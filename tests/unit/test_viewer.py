@@ -51,6 +51,76 @@ class FileBackedFakeReader(FakeTemperatureReader):
         self.height = frames[0].temperature_c.shape[0]
 
 
+class FakeSelectionDialogs:
+    def __init__(self, save=None, load=None, answer=True):
+        self.save = save
+        self.load = load
+        self.answer = answer
+        self.confirmations = []
+        self.details = []
+        self.choices = []
+
+    def choose_save(self, initial_dir, suggested_name):
+        self.choices.append(("save", initial_dir, suggested_name))
+        return self.save
+
+    def choose_load(self, initial_dir):
+        self.choices.append(("load", initial_dir))
+        return self.load
+
+    def confirm(self, message):
+        self.confirmations.append(message)
+        return self.answer
+
+    def show_details(self, message):
+        self.details.append(message)
+
+
+@pytest.fixture(autouse=True)
+def no_real_dialogs(monkeypatch):
+    # All UI tests must opt into specific choices; never display an OS window.
+    monkeypatch.setattr(viewer, "SelectionDialogs", lambda parent=None: FakeSelectionDialogs(), raising=False)
+
+
+def test_save_dialog_cancel_keeps_dirty_state_and_writes_nothing(tmp_path):
+    reader = FileBackedFakeReader(make_frames(4), tmp_path / "source.seq")
+    session = ViewerSession(reader, selection_store=SelectionStore(tmp_path / "configs"))
+    ui = build_viewer(session, dialogs=FakeSelectionDialogs())
+    try:
+        session.selection_dirty = True
+        before = session.state_signature()
+        ui.save_button._observers.process("clicked", None)
+        assert session.selection_dirty
+        assert session.state_signature() == before
+        assert session.selection_path is None
+        assert not (tmp_path / "configs").exists()
+    finally:
+        plt.close(ui.figure)
+
+
+def test_file_dialogs_can_save_and_choose_two_configurations(tmp_path):
+    reader = FileBackedFakeReader(make_frames(5), tmp_path / "source.seq")
+    session = ViewerSession(reader, selection_store=SelectionStore(tmp_path / "configs"))
+    first, second = tmp_path / "a.selection.json", tmp_path / "b.selection.json"
+    dialogs = FakeSelectionDialogs(save=first, load=first)
+    ui = build_viewer(session, dialogs=dialogs)
+    try:
+        ui.range_slider.set_val((1, 3))
+        ui.save_button._observers.process("clicked", None)
+        assert session.selection_path == first
+        dialogs.save = second
+        ui.range_slider.set_val((2, 4))
+        ui.save_button._observers.process("clicked", None)
+        assert session.selection_path == second
+        ui.load_button._observers.process("clicked", None)
+        assert session.selection_path == first
+        assert (session.timeline.source_start, session.timeline.source_end) == (1, 3)
+        assert not session.has_unsaved_changes()
+        assert first.is_file() and second.is_file()
+    finally:
+        plt.close(ui.figure)
+
+
 def make_frames(count: int = 2) -> list[TemperatureFrame]:
     start = datetime(2026, 8, 28, 9, 0, 0)
     return [
@@ -540,18 +610,18 @@ def test_resubmitting_unchanged_endpoint_does_not_mark_selection_dirty():
     plt.close(ui.figure)
 
 
-def test_resubmitting_unchanged_endpoint_preserves_pending_load_confirmation(
+def test_resubmitting_unchanged_endpoint_preserves_state_after_declining_load(
     tmp_path,
 ):
     reader = FileBackedFakeReader(make_frames(count=3), tmp_path / "sample.seq")
     session = ViewerSession(
         reader, selection_store=SelectionStore(tmp_path / "selections")
     )
-    ui = build_viewer(session)
+    dialogs = FakeSelectionDialogs(load=session.selection_store.path_for(reader.path), answer=False)
+    ui = build_viewer(session, dialogs=dialogs)
     session.save_selection()
     ui.range_slider.set_val((0, 1))
     ui.load_button._observers.process("clicked", None)
-    confirmation = ui.mode_state.load_confirmation_signature
     before = (
         session.timeline.pending_range,
         session.timeline.current_local_frame,
@@ -565,8 +635,8 @@ def test_resubmitting_unchanged_endpoint_preserves_pending_load_confirmation(
         session.timeline.current_local_frame,
         session.selection_dirty,
     ) == before
-    assert ui.mode_state.load_confirmation_signature == confirmation
-    assert ui.load_button.label.get_text() == "Confirm load"
+    assert len(dialogs.confirmations) == 1
+    assert ui.load_button.label.get_text() == "Load selection"
     plt.close(ui.figure)
 
 
@@ -896,115 +966,177 @@ def test_save_and_load_buttons_restore_confirmed_range_and_display(tmp_path):
     reader = FileBackedFakeReader(make_frames(count=10), tmp_path / "sample.seq")
     store = SelectionStore(tmp_path / "selections")
     session = ViewerSession(reader, selection_store=store)
-    ui = build_viewer(session)
-    ui.range_slider.set_val((2, 7))
-    ui.save_button._observers.process("clicked", None)
-    assert "Saved selection" in ui.error_text.get_text()
-    assert ui.error_text.get_color() == "forestgreen"
-
-    session.timeline.reset_full()
-    session.colormap = "viridis"
-    session.color_limits = ColorLimits(50.0, 60.0)
-    ui.image.set_cmap("viridis")
-    ui.image.set_clim(50.0, 60.0)
-    ui.load_button._observers.process("clicked", None)
-
-    assert ui.load_button.label.get_text() == "Confirm load"
-    assert (session.timeline.source_start, session.timeline.source_end) == (0, 9)
-
-    ui.load_button._observers.process("clicked", None)
-
-    assert (session.timeline.source_start, session.timeline.source_end) == (2, 7)
-    assert session.timeline.pending_range == (0, 5)
-    assert session.timeline.current_local_frame == 0
-    assert session.colormap == "inferno"
-    assert ui.image.get_clim() == pytest.approx((1.05, 5.95))
-    assert "Loaded selection" in ui.error_text.get_text()
-    assert ui.error_text.get_color() == "forestgreen"
-    plt.close(ui.figure)
+    target = store.path_for(reader.path)
+    dialogs = FakeSelectionDialogs(save=target, load=target)
+    ui = build_viewer(session, dialogs=dialogs)
+    try:
+        ui.range_slider.set_val((2, 7))
+        ui.save_button._observers.process("clicked", None)
+        assert "Saved selection" in ui.error_text.get_text()
+        assert ui.error_text.get_color() == "forestgreen"
+        session.timeline.reset_full()
+        session.colormap = "viridis"
+        session.color_limits = ColorLimits(50.0, 60.0)
+        ui.image.set_cmap("viridis")
+        ui.image.set_clim(50.0, 60.0)
+        ui.load_button._observers.process("clicked", None)
+        assert len(dialogs.confirmations) == 1
+        assert (session.timeline.source_start, session.timeline.source_end) == (2, 7)
+        assert session.timeline.pending_range == (0, 5)
+        assert session.timeline.current_local_frame == 0
+        assert session.colormap == "inferno"
+        assert ui.image.get_clim() == pytest.approx((1.05, 5.95))
+        assert "Loaded selection" in ui.error_text.get_text()
+        assert ui.error_text.get_color() == "forestgreen"
+    finally:
+        plt.close(ui.figure)
 
 
-def test_dirty_session_requires_second_load_click(tmp_path):
+def test_dirty_session_requires_explicit_confirmation(tmp_path):
     reader = FileBackedFakeReader(make_frames(count=3), tmp_path / "sample.seq")
-    session = ViewerSession(
-        reader, selection_store=SelectionStore(tmp_path / "selections")
-    )
-    ui = build_viewer(session)
-    session.save_selection()
-    session.apply_transform(session.applied_transform.with_angle(10.0))
+    session = ViewerSession(reader, selection_store=SelectionStore(tmp_path / "selections"))
+    dialogs = FakeSelectionDialogs(load=session.selection_store.path_for(reader.path), answer=False)
+    ui = build_viewer(session, dialogs=dialogs)
+    try:
+        session.save_selection()
+        session.apply_transform(session.applied_transform.with_angle(10.0))
+        ui.load_button._observers.process("clicked", None)
+        assert session.applied_transform.rotation.angle_deg == 10.0
+        assert "range, color scale, colormap, and transform" in dialogs.confirmations[0]
+        assert session.selection_dirty
+        dialogs.answer = True
+        ui.load_button._observers.process("clicked", None)
+        assert session.applied_transform.rotation.angle_deg == 0.0
+        assert not session.selection_dirty
+        assert ui.load_button.label.get_text() == "Load selection"
+    finally:
+        plt.close(ui.figure)
 
-    ui.load_button._observers.process("clicked", None)
-    assert ui.load_button.label.get_text() == "Confirm load"
-    assert session.applied_transform.rotation.angle_deg == 10.0
-    assert "range, color scale, colormap, and transform" in ui.error_text.get_text()
 
-    ui.load_button._observers.process("clicked", None)
-    assert session.applied_transform.rotation.angle_deg == 0.0
-    assert session.selection_dirty is False
-    assert ui.load_button.label.get_text() == "Load selection"
-    plt.close(ui.figure)
-
-
-def test_state_change_invalidates_load_confirmation_but_browsing_does_not(tmp_path):
+def test_load_cancel_keeps_all_state_and_does_not_confirm(tmp_path):
     reader = FileBackedFakeReader(make_frames(count=3), tmp_path / "sample.seq")
-    session = ViewerSession(
-        reader, selection_store=SelectionStore(tmp_path / "selections")
-    )
-    ui = build_viewer(session)
-    session.save_selection()
-    ui.range_slider.set_val((0, 1))
-    ui.load_button._observers.process("clicked", None)
-    signature = ui.mode_state.load_confirmation_signature
-
-    ui.slider.set_val(1)
-    assert ui.mode_state.load_confirmation_signature == signature
-
-    ui.range_slider.set_val((1, 1))
-    assert ui.mode_state.load_confirmation_signature is None
-    assert ui.load_button.label.get_text() == "Load selection"
-    plt.close(ui.figure)
+    session = ViewerSession(reader)
+    dialogs = FakeSelectionDialogs()
+    ui = build_viewer(session, dialogs=dialogs)
+    try:
+        session.apply_transform(session.applied_transform.with_angle(10))
+        before = (session.state_signature(), session.selection_path, session.selection_dirty)
+        ui.load_button._observers.process("clicked", None)
+        assert (session.state_signature(), session.selection_path, session.selection_dirty) == before
+        assert not dialogs.confirmations
+    finally:
+        plt.close(ui.figure)
 
 
-def test_save_clears_dirty_and_pending_load_confirmation(tmp_path):
+@pytest.mark.parametrize("kind", ["invalid-json", "invalid-colormap", "wrong-source"])
+def test_invalid_load_never_confirms_or_mutates(tmp_path, kind):
     reader = FileBackedFakeReader(make_frames(count=3), tmp_path / "sample.seq")
-    session = ViewerSession(
-        reader, selection_store=SelectionStore(tmp_path / "selections")
-    )
-    ui = build_viewer(session)
-    ui.range_slider.set_val((0, 1))
-    ui.load_button._observers.process("clicked", None)
+    session = ViewerSession(reader)
+    target = tmp_path / "broken.selection.json"
+    dialogs = FakeSelectionDialogs(load=target)
+    ui = build_viewer(session, dialogs=dialogs)
+    try:
+        payload = session.selection_document().to_dict()
+        if kind == "invalid-colormap":
+            payload["display"]["colormap"] = "does-not-exist"
+        elif kind == "wrong-source":
+            payload["source"]["filename"] = "other.seq"
+        target.write_text("{" if kind == "invalid-json" else json.dumps(payload), encoding="utf-8")
+        session.selection_dirty = True
+        before = session.state_signature()
+        ui.load_button._observers.process("clicked", None)
+        assert session.state_signature() == before and session.selection_dirty
+        assert session.selection_path is None
+        assert not dialogs.confirmations
+        assert "Load selection failed" in ui.error_text.get_text()
+        assert str(target) in ui.message_details["message"]
+    finally:
+        plt.close(ui.figure)
 
-    ui.save_button._observers.process("clicked", None)
 
-    assert session.selection_dirty is False
-    assert ui.mode_state.load_confirmation_signature is None
-    assert ui.load_button.label.get_text() == "Load selection"
-    assert "Transform: applied" in ui.transform_status_text.get_text()
-    plt.close(ui.figure)
-
-
-def test_save_failure_invalidates_pending_load_confirmation(tmp_path, monkeypatch):
+@pytest.mark.parametrize("kind", ["refuse", "external-change", "write-error"])
+def test_save_overwrite_keeps_file_and_session_on_failure(tmp_path, monkeypatch, kind):
     reader = FileBackedFakeReader(make_frames(count=3), tmp_path / "sample.seq")
-    session = ViewerSession(
-        reader, selection_store=SelectionStore(tmp_path / "selections")
-    )
-    ui = build_viewer(session)
-    session.save_selection()
-    ui.range_slider.set_val((0, 1))
-    ui.load_button._observers.process("clicked", None)
-    assert ui.mode_state.load_confirmation_signature is not None
+    session = ViewerSession(reader, selection_store=SelectionStore(tmp_path / "selections"))
+    target = session.selection_store.path_for(reader.path)
+    dialogs = FakeSelectionDialogs(save=target)
+    ui = build_viewer(session, dialogs=dialogs)
+    try:
+        session.save_selection()
+        before_bytes = target.read_bytes()
+        ui.range_slider.set_val((0, 1))
+        before = session.state_signature()
+        if kind == "refuse":
+            dialogs.answer = False
+        elif kind == "external-change":
+            def change_during_confirmation(message):
+                target.write_bytes(b"external")
+                return True
+            dialogs.confirm = change_during_confirmation
+        else:
+            def fail_save(*args, **kwargs):
+                raise OSError("disk full")
+            monkeypatch.setattr(session, "save_selection", fail_save)
+        ui.save_button._observers.process("clicked", None)
+        assert session.selection_dirty
+        assert session.state_signature() == before
+        assert target.read_bytes() == (b"external" if kind == "external-change" else before_bytes)
+        if kind != "refuse":
+            assert "Save selection failed" in ui.error_text.get_text()
+            assert str(target) in ui.message_details["message"]
+    finally:
+        plt.close(ui.figure)
 
-    def fail_save():
-        raise OSError("disk full")
 
-    monkeypatch.setattr(session, "save_selection", fail_save)
-    ui.save_button._observers.process("clicked", None)
+def test_load_dialog_backend_error_is_reported(tmp_path):
+    reader = FileBackedFakeReader(make_frames(count=3), tmp_path / "sample.seq")
+    session = ViewerSession(reader)
+    dialogs = FakeSelectionDialogs()
+    def fail_choose(initial_dir):
+        raise RuntimeError("backend unavailable")
+    dialogs.choose_load = fail_choose
+    ui = build_viewer(session, dialogs=dialogs)
+    try:
+        before = session.state_signature()
+        ui.load_button._observers.process("clicked", None)
+        assert session.state_signature() == before
+        assert "backend unavailable" in ui.message_details["message"]
+    finally:
+        plt.close(ui.figure)
 
-    assert session.selection_dirty is True
-    assert ui.mode_state.load_confirmation_signature is None
-    assert ui.load_button.label.get_text() == "Load selection"
-    assert "Save selection failed: disk full" in ui.error_text.get_text()
-    plt.close(ui.figure)
+
+def test_f1_sends_untruncated_message_to_dialog(tmp_path):
+    dialogs = FakeSelectionDialogs()
+    ui = build_viewer(ViewerSession(FakeTemperatureReader(make_frames())), dialogs=dialogs)
+    try:
+        message = "D:/" + "long-path/" * 100
+        ui.error_text.set_text(message)
+        ui.figure.canvas.draw()
+        ui.figure.canvas.callbacks.process("key_press_event", KeyEvent("key_press_event", ui.figure.canvas, key="f1"))
+        assert message in dialogs.details[0]
+        assert ui.message_details["message"] == message
+    finally:
+        plt.close(ui.figure)
+
+
+def test_f1_dialog_failure_remains_bounded_and_prints_cause(capsys):
+    dialogs = FakeSelectionDialogs()
+    failure = "unavailable " * 100
+    def fail_details(message):
+        raise RuntimeError(failure)
+    dialogs.show_details = fail_details
+    ui = build_viewer(ViewerSession(FakeTemperatureReader(make_frames())), dialogs=dialogs)
+    try:
+        ui.figure.set_size_inches(10, 8)
+        ui.figure.canvas.callbacks.process("key_press_event", KeyEvent("key_press_event", ui.figure.canvas, key="f1"))
+        assert failure in capsys.readouterr().out
+        renderer = ui.figure.canvas.get_renderer()
+        for text in ui.figure.texts:
+            if text.get_visible() and text.get_text():
+                box = text.get_window_extent(renderer)
+                assert ui.figure.bbox.contains(box.x1, box.y1)
+    finally:
+        plt.close(ui.figure)
 
 
 def test_native_export_request_ignores_applied_transform(tmp_path):

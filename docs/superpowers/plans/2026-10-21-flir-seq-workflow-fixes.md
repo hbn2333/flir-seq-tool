@@ -300,7 +300,7 @@ tkinter 采用惰性导入；优先使用 figure.manager.window 的 Tk 父窗口
 
 文件：修改 `viewer.py` 的 ViewerSession、ViewerModeState、build_viewer 与 on_save/on_load；修改 `tests/unit/test_viewer.py`。
 
-- [ ] 先写取消测试，用明确的测试替身，不能让旧 GUI 测试弹真实框：
+- [x] 先写取消测试，用明确的测试替身，不能让旧 GUI 测试弹真实框：
 
 ```python
 class FakeSelectionDialogs:
@@ -339,8 +339,8 @@ def test_save_dialog_cancel_keeps_dirty_state_and_writes_nothing(tmp_path):
         plt.close(ui.figure)
 ```
 
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_viewer.py -k save_dialog_cancel -q`，预期新注入参数/行为尚未存在。
-- [ ] session 新增 `selection_path: Path | None = None`；`save_selection(target=None, *, expected_target=None, expected_backup=None)` 保留无参旧行为；显式路径要求两个快照，成功后才改变 selection_path、dirty、clean signature。`load_selection(target=None)` 用新 store 入口读取，再调用抽出的 `apply_selection_document(document, *, path)`；该函数在任何 session 赋值前完成源身份、colormap、FrameTransformer、ColorLimits 和新 TimelineState 的构造验证，最后整体赋值并清缓存。
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_viewer.py -k save_dialog_cancel -q`，预期新注入参数/行为尚未存在。
+- [x] session 新增 `selection_path: Path | None = None`；`save_selection(target=None, *, expected_target=None, expected_backup=None)` 保留无参旧行为；显式路径要求两个快照，成功后才改变 selection_path、dirty、clean signature。`load_selection(target=None)` 用新 store 入口读取，再调用抽出的 `apply_selection_document(document, *, path)`；该函数在任何 session 赋值前完成源身份、colormap、FrameTransformer、ColorLimits 和新 TimelineState 的构造验证，最后整体赋值并清缓存。
 
 `build_viewer` 增加 `dialogs=None`，默认 `SelectionDialogs`，测试显式注入。移除旧 load_confirmation_signature、Confirm load 二次点击流程及相关失效函数，替换其测试为单次显式确认行为，保留“切帧不变脏”的原断言。
 
@@ -348,8 +348,8 @@ def test_save_dialog_cancel_keeps_dirty_state_and_writes_nothing(tmp_path):
 
 保存回调顺序固定为：选择 → None 返回 → 捕获规范化目标和备份快照 → 目标存在时确认 → 调用 session 保存 → 刷新状态/全文路径。加载顺序固定为：选择 → None 返回 → 读取并验证完整 document → 有未保存更改时确认 → 应用已验证 document → 更新控件/温标。确认后应用前再次核验源身份；读取无效文件不应弹丢弃改动确认。
 
-- [ ] 给旧 GUI 保存/加载测试全部注入替身。新增两套配置选择、覆盖拒绝、确认期间外部创建目标、加载损坏文件、错误色图、脏状态拒绝、保存失败原状态保留、编辑模式禁止调用对话框、F1 详情窗口收到完整路径测试。
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_selection.py tests/unit/test_selection_dialogs.py tests/unit/test_viewer.py -q`，通过后提交：`feat: connect selection file dialogs to viewer state`。
+- [x] 给旧 GUI 保存/加载测试全部注入替身。新增两套配置选择、覆盖拒绝、确认期间外部创建目标、加载损坏文件、错误色图、脏状态拒绝、保存失败原状态保留、编辑模式禁止调用对话框、F1 详情窗口收到完整路径测试。
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_selection.py tests/unit/test_selection_dialogs.py tests/unit/test_viewer.py -q`，通过后提交：`feat: connect selection file dialogs to viewer state`。
 
 检查点 B：可单独验收“保存方案 A/B → 加载其中之一 → 取消不变”。此时原生导出仍未配套，不提前把 EXP-001 标为修复。
 
@@ -633,7 +633,7 @@ if ($seqTestExit -ne 0) { throw "pytest failed with exit code $seqTestExit" }
 
 ## 覆盖自查
 
-阶段验证补充：任务 2 提交 f50dabb。任务 3 的显式配置读写与快照保护已完成，目标回归 97 passed、2 skipped（1.22 s）；完整回归 347 passed、2 skipped（152.14 s），三份 raw 的大小/mtime 不变。跳过项为文件及目录符号链接创建，当前 Windows 返回 WinError 1314；硬链接保护通过。已复核并补上“旧文件移入备份后 stat 失败”的回滚测试。任务 4–10 尚未完成，尚未接通 GUI 文件选择，也未实现配套导出。
+阶段验证补充：任务 2 提交 f50dabb。任务 3 的显式配置读写与快照保护已完成，目标回归 97 passed、2 skipped（1.22 s）；完整回归 347 passed、2 skipped（152.14 s），三份 raw 的大小/mtime 不变。跳过项为文件及目录符号链接创建，当前 Windows 返回 WinError 1314；硬链接保护通过。已复核并补上“旧文件移入备份后 stat 失败”的回滚测试。任务 4 原生对话框适配器已完成（f9c256f，14 passed）；任务 5 已接通 GUI 文件选择，目标回归 160 passed（164.14 s）。已覆盖取消、两套配置、覆盖拒绝、外部改动、损坏配置与 F1 后端失败；尚未实现配套导出。
 
 | 设计要求 | 计划任务 |
 | --- | --- |
@@ -648,4 +648,4 @@ if ($seqTestExit -ne 0) { throw "pytest failed with exit code $seqTestExit" }
 | 最小真实源、三份 raw 前后核对、有界缓存 | 10 |
 | Git 分项提交、修正文档、用户验收后发布 | 全部任务及任务 10 |
 
-执行状态：任务 1–2 已实现并验证，任务 3–10 未完成。任务 1 提交 aab11a6；Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。任务 2 目标回归 131 passed（145.73 s），无警告；用 BoundedMessage 在绘制时按 renderer 宽度缩略，完整信息独立保存，F1 输出全文；长度拟合按测量比例收敛，避免逐字重复测量。最小真实 SEQ 的 1000×800 普通/编辑模式渲染图已检查，保存于忽略目录 picture/workflow-layout-20261021；三份 raw 的大小和纳秒 mtime 均未改变。Windows 原生窗口人工验收尚未完成。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。
+执行状态：任务 1–5 已实现并验证，任务 6–10 未完成。任务 1 提交 aab11a6；Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。任务 2 目标回归 131 passed（145.73 s），无警告；用 BoundedMessage 在绘制时按 renderer 宽度缩略，完整信息独立保存，F1 输出全文；长度拟合按测量比例收敛，避免逐字重复测量。最小真实 SEQ 的 1000×800 普通/编辑模式渲染图已检查，保存于忽略目录 picture/workflow-layout-20261021；三份 raw 的大小和纳秒 mtime 均未改变。Windows 原生窗口人工验收尚未完成。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。

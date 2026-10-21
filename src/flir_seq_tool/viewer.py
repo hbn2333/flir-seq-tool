@@ -32,7 +32,10 @@ from .selection import (
     SelectionStore,
     SourceIdentity,
     build_selection_document,
+    validate_source_identity,
 )
+from .selection_dialogs import SelectionDialogs
+from .file_safety import TargetSnapshot
 from .timeline import TimelineState
 from .transform import FrameTransform
 from .transform_editor import TransformDraft, TransformEditorUI, build_transform_editor
@@ -77,6 +80,7 @@ class ViewerSession:
         self._preview_transformer_key: str | None = None
         self._preview_transformer: FrameTransformer | None = None
         self.selection_dirty = False
+        self.selection_path: Path | None = None
         self._clean_state_signature: str | None = None
         self.timeline = TimelineState(reader.num_frames)
         self._work_time_key: tuple[int, int] | None = None
@@ -205,18 +209,33 @@ class ViewerSession:
             transform=self.applied_transform,
         )
 
-    def save_selection(self) -> Path:
-        target = self.selection_store.save(
-            Path(self.reader.path), self.selection_document()
-        )
+    def save_selection(
+        self, target: Path | None = None, *,
+        expected_target: TargetSnapshot | None = None,
+        expected_backup: TargetSnapshot | None = None,
+    ) -> Path:
+        if target is None:
+            target = self.selection_store.save(Path(self.reader.path), self.selection_document())
+        else:
+            if expected_target is None or expected_backup is None:
+                raise ValueError("explicit selection save requires confirmed target snapshots")
+            target = self.selection_store.save_to(
+                target, self.selection_document(), source_path=Path(self.reader.path),
+                expected_target=expected_target, expected_backup=expected_backup,
+            )
+        self.selection_path = target
         self.selection_dirty = False
         self._clean_state_signature = self.state_signature()
         return target
 
-    def load_selection(self) -> SelectionDocument:
-        document = self.selection_store.load_expected(
-            Path(self.reader.path), self.source_identity()
-        )
+    def load_selection(self, target: Path | None = None) -> SelectionDocument:
+        target = self.selection_store.path_for(Path(self.reader.path)) if target is None else Path(target)
+        document = self.selection_store.load_path(target, self.source_identity())
+        self.apply_selection_document(document, path=target)
+        return document
+
+    def _prepare_selection(self, document: SelectionDocument):
+        validate_source_identity(self.source_identity(), document.source)
         if document.display.colormap not in plt.colormaps():
             raise ValueError(f"unknown colormap: {document.display.colormap}")
         self._validate_transform(document.transform)
@@ -225,10 +244,16 @@ class ViewerSession:
             vmin=document.display.vmin_c,
             vmax=document.display.vmax_c,
         )
-        self.timeline.restore_source_range(
+        timeline = TimelineState(self.reader.num_frames)
+        timeline.restore_source_range(
             document.selection.source_start_frame,
             document.selection.source_end_frame,
         )
+        return timeline, new_transformer, new_color_limits
+
+    def apply_selection_document(self, document: SelectionDocument, *, path: Path) -> None:
+        timeline, new_transformer, new_color_limits = self._prepare_selection(document)
+        self.timeline = timeline
         self.colormap = document.display.colormap
         self.color_limits = new_color_limits
         self.applied_transform = document.transform
@@ -240,7 +265,7 @@ class ViewerSession:
         self._work_time_value = None
         self.selection_dirty = False
         self._clean_state_signature = self.state_signature()
-        return document
+        self.selection_path = Path(path)
 
     def state_signature(self) -> str:
         limits = self.color_limits
@@ -291,7 +316,6 @@ class ViewerExportState:
 @dataclass
 class ViewerModeState:
     editing_transform: bool = False
-    load_confirmation_signature: str | None = None
 
 
 @dataclass(frozen=True)
@@ -352,6 +376,7 @@ def build_viewer(
     initial_frame: int = 0,
     clips_root: Path | None = None,
     export_job_factory: Callable[[ExportRequest], Any] = ExportJob,
+    dialogs: SelectionDialogs | None = None,
 ) -> ViewerUI:
     frame = session.frame_at_local(initial_frame)
     limits = session.color_limits
@@ -360,6 +385,8 @@ def build_viewer(
 
     clips_root = clips_root or (WORKSPACE_ROOT / "clips")
     figure, axes = plt.subplots(figsize=(12, 10))
+    if dialogs is None:
+        dialogs = SelectionDialogs(getattr(figure.canvas.manager, "window", None))
     figure.subplots_adjust(bottom=0.56, right=0.87)
     image = axes.imshow(
         frame.temperature_c,
@@ -563,16 +590,8 @@ def build_viewer(
         if mode_state.editing_transform:
             slider.ax.set_visible(True)
 
-    def invalidate_load_confirmation() -> None:
-        if mode_state.load_confirmation_signature is None:
-            return
-        mode_state.load_confirmation_signature = None
-        load_button.label.set_text("Load selection")
-        figure.canvas.draw_idle()
-
     def mark_selection_dirty() -> None:
         session.selection_dirty = True
-        invalidate_load_confirmation()
         refresh_transform_status()
 
     def on_current(value: float) -> None:
@@ -652,13 +671,24 @@ def build_viewer(
         if mode_state.editing_transform:
             set_error("Cannot save a selection while editing transform")
             return
+        target = None
         try:
-            target = session.save_selection()
+            target = dialogs.choose_save(
+                session.selection_store.root,
+                session.selection_store.path_for(Path(session.reader.path)).name,
+            )
+            if target is None:
+                return
+            expected_target = TargetSnapshot.capture(target)
+            expected_backup = TargetSnapshot.capture(target.with_name(target.name + ".bak"))
+            if expected_target.exists and not dialogs.confirm(f"Overwrite selection?\n{target}"):
+                return
+            target = session.save_selection(
+                target, expected_target=expected_target, expected_backup=expected_backup,
+            )
         except (OSError, ValueError, RuntimeError) as exc:
-            invalidate_load_confirmation()
-            set_error(f"Save selection failed: {exc}")
+            set_error(f"Save selection failed: {exc}" + (f"\nFile: {target}" if target is not None else ""))
             return
-        invalidate_load_confirmation()
         refresh_transform_status()
         set_error(f"Saved selection: {target}", error=False)
 
@@ -666,24 +696,22 @@ def build_viewer(
         if mode_state.editing_transform:
             set_error("Cannot load a selection while editing transform")
             return
-        signature = session.state_signature()
-        if session.has_unsaved_changes():
-            if mode_state.load_confirmation_signature != signature:
-                mode_state.load_confirmation_signature = signature
-                load_button.label.set_text("Confirm load")
-                set_error(
-                    "Loading will replace the pending range, color scale, "
-                    "colormap, and transform. Click Confirm load to continue."
-                )
-                return
+        target = None
         try:
-            target = session.selection_store.path_for(Path(session.reader.path))
-            session.load_selection()
+            target = dialogs.choose_load(session.selection_store.root)
+            if target is None:
+                return
+            document = session.selection_store.load_path(target, session.source_identity())
+            session._prepare_selection(document)
+            if session.has_unsaved_changes() and not dialogs.confirm(
+                "Replace unsaved range, color scale, colormap, and transform?\n"
+                f"Load: {target}"
+            ):
+                return
+            session.apply_selection_document(document, path=target)
         except (OSError, ValueError, RuntimeError) as exc:
-            invalidate_load_confirmation()
-            set_error(f"Load selection failed: {exc}")
+            set_error(f"Load selection failed: {exc}" + (f"\nFile: {target}" if target is not None else ""))
             return
-        invalidate_load_confirmation()
         image.set_cmap(session.colormap)
         if session.color_limits is None:
             raise RuntimeError("loaded selection has no color limits")
@@ -740,7 +768,6 @@ def build_viewer(
         except (IndexError, ValueError, RuntimeError) as exc:
             set_error(f"Apply transform failed: {exc}")
             return
-        invalidate_load_confirmation()
         leave_transform_mode()
         refresh_transform_status()
 
@@ -888,11 +915,18 @@ def build_viewer(
         if event.key != "f1":
             return
         hidden = {"export", "progress"} if mode_state.editing_transform else {"editor_error", "editor_status"}
-        print("\n".join(
+        details = "\n".join(
             f"{key}: {value}" for key, value in message_details.items()
             if key not in hidden and value
-        ))
-        details_notice.set_text("Full details printed to console")
+        )
+        print(details)
+        try:
+            dialogs.show_details(details)
+        except RuntimeError as exc:
+            print(f"Details dialog failed: {exc}")
+            details_notice.set_text("Dialog unavailable; full details printed to console")
+        else:
+            details_notice.set_text("Full details also printed to console")
         figure.canvas.draw_idle()
 
     transform_editor = build_transform_editor(
