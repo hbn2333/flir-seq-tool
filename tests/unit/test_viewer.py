@@ -274,6 +274,62 @@ def test_edit_transform_switches_single_window_controls_and_keeps_frame_slider()
     plt.close(ui.figure)
 
 
+def test_edit_mode_hides_normal_export_text_and_marks_draft():
+    ui = build_viewer(ViewerSession(FakeTemperatureReader(make_frames())))
+    try:
+        ui.export_text.set_text("Previous export summary")
+        ui.progress_text.set_text("Previous export progress")
+        ui.edit_transform_button._observers.process("clicked", None)
+        assert not ui.export_text.get_visible()
+        assert not ui.progress_text.get_visible()
+        assert ui.status_text.get_visible()
+        assert "draft" in ui.transform_status_text.get_text().lower()
+        ui.transform_editor.set_angle(-3.2)
+        assert "-3.2" in ui.transform_status_text.get_text()
+        ui.transform_editor.cancel_button._observers.process("clicked", None)
+        assert ui.export_text.get_visible()
+        assert ui.progress_text.get_visible()
+        assert "applied" in ui.transform_status_text.get_text().lower()
+    finally:
+        plt.close(ui.figure)
+
+
+@pytest.mark.parametrize("size", [(10, 8), (12, 10), (16, 10)])
+@pytest.mark.parametrize("dpi", [100, 150, 200])
+@pytest.mark.parametrize("editing", [False, True])
+def test_controls_and_information_do_not_overlap(size, dpi, editing):
+    ui = build_viewer(ViewerSession(FakeTemperatureReader(make_frames())))
+    try:
+        ui.figure.set_size_inches(*size)
+        ui.figure.set_dpi(dpi)
+        if editing:
+            ui.edit_transform_button._observers.process("clicked", None)
+            ui.transform_editor.set_angle(-3.2)
+        ui.figure.canvas.draw()
+        renderer = ui.figure.canvas.get_renderer()
+        controls = [ui.slider.ax]
+        controls += list(ui.transform_editor.control_axes if editing else ui.normal_control_axes)
+        controls = [ax for ax in controls if ax.get_visible()]
+        texts = [text for ax in controls for text in ax.texts]
+        texts += list(ui.figure.texts)
+        texts = [t for t in texts if t.get_visible() and t.get_text()]
+        for text in texts:
+            box = text.get_window_extent(renderer)
+            assert ui.figure.bbox.contains(box.x0, box.y0), text.get_text()
+            assert ui.figure.bbox.contains(box.x1, box.y1), text.get_text()
+            for control in controls:
+                if text.axes is control:
+                    continue
+                assert not box.overlaps(control.get_window_extent(renderer)), text.get_text()
+        for index, text in enumerate(texts):
+            for other in texts[index + 1:]:
+                assert not text.get_window_extent(renderer).overlaps(
+                    other.get_window_extent(renderer)
+                ), (text.get_text(), other.get_text())
+    finally:
+        plt.close(ui.figure)
+
+
 def test_editor_frame_navigation_keeps_draft_and_uses_full_preview():
     ui = build_viewer(ViewerSession(FakeTemperatureReader(make_frames(count=3))))
     ui.edit_transform_button._observers.process("clicked", None)

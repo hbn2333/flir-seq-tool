@@ -59,7 +59,7 @@ git status --short --branch
 
 文件：新增 `src/flir_seq_tool/viewer_layout.py`、`tests/unit/test_viewer_layout.py`；修改 `src/flir_seq_tool/viewer.py` 的 `build_viewer`、`set_normal_controls_visible`、`refresh_transform_status`；修改 `src/flir_seq_tool/transform_editor.py` 的 `build_transform_editor`。
 
-- [ ] 在现有 `tests/unit/test_viewer.py` 复用 `FakeTemperatureReader` 和 `make_frames`，先加入模式切换失败测试：
+- [x] 在现有 `tests/unit/test_viewer.py` 复用 `FakeTemperatureReader` 和 `make_frames`，先加入模式切换失败测试：
 
 ```python
 def test_edit_mode_hides_normal_export_text_and_marks_draft():
@@ -79,8 +79,8 @@ def test_edit_mode_hides_normal_export_text_and_marks_draft():
         plt.close(ui.figure)
 ```
 
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_viewer.py -k edit_mode_hides -q`，预期因普通文本未隐藏/仍显示 applied 而失败，不接受导入或测试夹具错误作为有效红灯。
-- [ ] 创建共享布局字典，普通模式位置先保持不变；编辑模式改为以下独立区域。两个构建函数均从该模块读取，不再分别定义重复坐标：
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_viewer.py -k edit_mode_hides -q`，预期因普通文本未隐藏/仍显示 applied 而失败，不接受导入或测试夹具错误作为有效红灯。
+- [x] 创建共享布局字典，普通模式位置先保持不变；编辑模式改为以下独立区域。两个构建函数均从该模块读取，不再分别定义重复坐标：
 
 ```python
 # viewer_layout.py；figure 坐标，0..1
@@ -110,7 +110,7 @@ def label_above(box):
 
 普通控件坐标从当前 `build_viewer` 原样迁移到同一模块常量；编辑框标签均调用 `label_above`，不增加脱离控件可见性管理的 figure 标签。普通 export/progress 文本随普通控件一起隐藏/恢复。`refresh_transform_status` 在编辑时根据 `transform_editor.draft` 显示 `Transform: draft`，退出后恢复原 `transform_status`。
 
-- [ ] 在现有 viewer 测试加入 3 个逻辑尺寸 × 3 个 DPI × 普通/编辑模式参数化检查；新模块测试验证坐标不越界。实际绘制后检查标签、数值与非所属控件的 bbox，允许文字与其所属输入框/按钮相交，不允许把所有 TextBox 标签排除。下面是角度冲突的具体断言：
+- [x] 在现有 viewer 测试加入 3 个逻辑尺寸 × 3 个 DPI × 普通/编辑模式参数化检查；新模块测试验证坐标不越界。实际绘制后检查标签、数值与非所属控件的 bbox，允许文字与其所属输入框/按钮相交，不允许把所有 TextBox 标签排除。下面是角度冲突的具体断言：
 
 ```python
 @pytest.mark.parametrize("size", [(10, 8), (12, 10), (16, 10)])
@@ -133,8 +133,8 @@ def test_angle_value_does_not_overlap_total_box(size, dpi):
         plt.close(ui.figure)
 ```
 
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_viewer_layout.py tests/unit/test_viewer.py tests/unit/test_transform_editor.py -q`。预期全部通过，包括原有真实 canvas 单击/拖拽回归。
-- [ ] 提交上述布局源码及测试，消息：`fix: separate transform controls from viewer status`。
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_viewer_layout.py tests/unit/test_viewer.py tests/unit/test_transform_editor.py -q`。预期全部通过，包括原有真实 canvas 单击/拖拽回归。
+- [x] 提交上述布局源码及测试，消息：`fix: separate transform controls from viewer status`。
 
 ## 任务 2：长信息、缩放和完整路径可访问性
 
@@ -646,4 +646,4 @@ if ($seqTestExit -ne 0) { throw "pytest failed with exit code $seqTestExit" }
 | 最小真实源、三份 raw 前后核对、有界缓存 | 10 |
 | Git 分项提交、修正文档、用户验收后发布 | 全部任务及任务 10 |
 
-执行状态：未开始；上面的复选框均保持未勾选。计划中的新增函数/字段是实施契约，不表示当前代码已具备。
+执行状态：任务 1 已实现并验证，任务 2–10 未完成。任务 1 的 Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。

@@ -8,6 +8,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.text import Text
 from matplotlib.widgets import Button, RectangleSelector, Slider, TextBox
+from .viewer_layout import EDITOR_RECTS, TEXT_POSITIONS, label_above
 
 from .transform import (
     CropRect,
@@ -204,19 +205,16 @@ def build_transform_editor(
     if not isinstance(initial_transform, FrameTransform):
         raise ValueError("initial_transform must be a FrameTransform")
 
-    angle_slider_axes = figure.add_axes((0.12, 0.19, 0.42, 0.035))
-    angle_box_axes = figure.add_axes((0.56, 0.18, 0.10, 0.055))
+    angle_slider_axes = figure.add_axes(EDITOR_RECTS["angle_slider"])
+    angle_box_axes = figure.add_axes(EDITOR_RECTS["angle_box"])
     quick_axes = tuple(
-        figure.add_axes((left, 0.11, 0.085, 0.05))
-        for left in (0.12, 0.215, 0.31, 0.405)
+        figure.add_axes(rect) for rect in EDITOR_RECTS["quick"]
     )
     crop_axes = tuple(
-        figure.add_axes((left, 0.04, 0.085, 0.05))
-        for left in (0.12, 0.215, 0.31, 0.405)
+        figure.add_axes(rect) for rect in EDITOR_RECTS["crop"]
     )
     action_axes = tuple(
-        figure.add_axes((left, 0.04, 0.09, 0.05))
-        for left in (0.53, 0.63, 0.73, 0.83)
+        figure.add_axes(rect) for rect in EDITOR_RECTS["actions"]
     )
 
     angle_slider = Slider(
@@ -229,6 +227,7 @@ def build_transform_editor(
         valfmt="%.1f°",
     )
     angle_box = TextBox(angle_box_axes, "Total", initial="0.0")
+    label_above(angle_box)
     left_button = Button(quick_axes[0], "+90°")
     right_button = Button(quick_axes[1], "-90°")
     half_turn_button = Button(quick_axes[2], "180°")
@@ -242,16 +241,17 @@ def build_transform_editor(
         )
     }
     maximum_button = Button(action_axes[0], "Maximum")
+    for box in crop_boxes.values():
+        label_above(box)
     reset_button = Button(action_axes[1], "Reset")
     cancel_button = Button(action_axes[2], "Cancel")
     apply_button = Button(action_axes[3], "Apply")
-    status_text = figure.text(0.68, 0.205, "", fontsize=9, va="center")
+    status_text = figure.text(*TEXT_POSITIONS["editor_status"], "", fontsize=9, va="top")
     error_text = figure.text(
-        0.68,
-        0.17,
+        *TEXT_POSITIONS["editor_error"],
         "",
         fontsize=9,
-        va="center",
+        va="top",
         color="crimson",
     )
 

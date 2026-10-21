@@ -36,6 +36,7 @@ from .selection import (
 from .timeline import TimelineState
 from .transform import FrameTransform
 from .transform_editor import TransformDraft, TransformEditorUI, build_transform_editor
+from .viewer_layout import NORMAL_RECTS, TEXT_POSITIONS
 
 
 WORKSPACE_ROOT = Path(r"D:\carbonfoam\infrared")
@@ -377,18 +378,18 @@ def build_viewer(
         local_num_frames=session.timeline.local_num_frames,
     )
 
-    current_axes = figure.add_axes((0.15, 0.47, 0.65, 0.025))
-    range_axes = figure.add_axes((0.15, 0.425, 0.65, 0.025))
-    start_axes = figure.add_axes((0.15, 0.36, 0.12, 0.035))
-    end_axes = figure.add_axes((0.37, 0.36, 0.12, 0.035))
-    confirm_axes = figure.add_axes((0.57, 0.36, 0.13, 0.035))
-    reset_axes = figure.add_axes((0.72, 0.36, 0.16, 0.035))
-    save_axes = figure.add_axes((0.47, 0.31, 0.13, 0.035))
-    load_axes = figure.add_axes((0.61, 0.31, 0.13, 0.035))
-    edit_transform_axes = figure.add_axes((0.75, 0.31, 0.13, 0.035))
-    clip_name_axes = figure.add_axes((0.24, 0.255, 0.31, 0.035))
-    export_axes = figure.add_axes((0.57, 0.255, 0.13, 0.035))
-    cancel_axes = figure.add_axes((0.72, 0.255, 0.16, 0.035))
+    current_axes = figure.add_axes(NORMAL_RECTS["current"])
+    range_axes = figure.add_axes(NORMAL_RECTS["range"])
+    start_axes = figure.add_axes(NORMAL_RECTS["start"])
+    end_axes = figure.add_axes(NORMAL_RECTS["end"])
+    confirm_axes = figure.add_axes(NORMAL_RECTS["confirm"])
+    reset_axes = figure.add_axes(NORMAL_RECTS["reset"])
+    save_axes = figure.add_axes(NORMAL_RECTS["save"])
+    load_axes = figure.add_axes(NORMAL_RECTS["load"])
+    edit_transform_axes = figure.add_axes(NORMAL_RECTS["edit"])
+    clip_name_axes = figure.add_axes(NORMAL_RECTS["clip"])
+    export_axes = figure.add_axes(NORMAL_RECTS["export"])
+    cancel_axes = figure.add_axes(NORMAL_RECTS["cancel"])
     slider_max = max(1, session.reader.num_frames - 1)
     slider = Slider(
         ax=current_axes,
@@ -423,11 +424,11 @@ def build_viewer(
     export_button = Button(export_axes, "Export sub-SEQ")
     cancel_button = Button(cancel_axes, "Cancel export")
     cancel_button.set_active(False)
-    export_text = figure.text(0.15, 0.205, "", fontsize=7.5)
-    progress_text = figure.text(0.15, 0.155, "", fontsize=8.5)
-    transform_status_text = figure.text(0.15, 0.125, "", fontsize=8.5)
-    status_text = figure.text(0.15, 0.095, "", fontsize=8.5)
-    error_text = figure.text(0.15, 0.045, "", fontsize=8.5, color="crimson")
+    export_text = figure.text(*TEXT_POSITIONS["export"], "", fontsize=7.5, va="top")
+    progress_text = figure.text(*TEXT_POSITIONS["progress"], "", fontsize=8.5, va="top")
+    transform_status_text = figure.text(*TEXT_POSITIONS["transform"], "", fontsize=8.5, va="top")
+    status_text = figure.text(*TEXT_POSITIONS["timeline"], "", fontsize=8.5, va="top")
+    error_text = figure.text(*TEXT_POSITIONS["message"], "", fontsize=8.5, color="crimson", va="top")
     export_state = ViewerExportState()
     mode_state = ViewerModeState()
     updating = False
@@ -468,6 +469,14 @@ def build_viewer(
         axes.set_ylim(height - 0.5, -0.5)
 
     def refresh_transform_status() -> None:
+        if mode_state.editing_transform:
+            draft = transform_editor.draft
+            crop = draft.crop
+            transform_status_text.set_text(
+                f"Transform: draft | angle {draft.angle_deg:.1f}° | "
+                f"crop {crop.x},{crop.y},{crop.width}×{crop.height}"
+            )
+            return
         transform_status_text.set_text(
             transform_status(session.applied_transform, session.has_unsaved_changes())
         )
@@ -689,6 +698,8 @@ def build_viewer(
     def set_normal_controls_visible(visible: bool) -> None:
         for control_axis in normal_control_axes:
             control_axis.set_visible(visible)
+        export_text.set_visible(visible)
+        progress_text.set_visible(visible)
 
     def leave_transform_mode(*, refresh: bool = True) -> None:
         mode_state.editing_transform = False
