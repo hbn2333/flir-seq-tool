@@ -326,6 +326,143 @@ def test_source_identity_reports_first_mismatch(tmp_path: Path):
         validate_source_identity(expected, actual)
 
 
+def test_explicit_selection_path_round_trip(tmp_path):
+    from flir_seq_tool.extraction import TargetSnapshot
+
+    source = tmp_path / "sample.seq"
+    source.write_bytes(b"source")
+    doc = sample_document(source)
+    store = SelectionStore(tmp_path / "defaults")
+    target = tmp_path / "custom" / "experiment-a.selection.json"
+    store.save_to(
+        target, doc, source_path=source,
+        expected_target=TargetSnapshot.capture(target),
+        expected_backup=TargetSnapshot.capture(target.with_name(target.name + ".bak")),
+    )
+    assert store.load_path(target, doc.source) == doc
+    assert not store.path_for(source).exists()
+
+
+@pytest.mark.parametrize("changed", ["target", "backup"])
+@pytest.mark.parametrize("existing", [False, True])
+def test_explicit_save_rejects_changes_since_confirmation(tmp_path, changed, existing):
+    from flir_seq_tool.extraction import TargetSnapshot
+
+    source = tmp_path / "sample.seq"
+    target = tmp_path / "experiment.selection.json"
+    backup = target.with_name(target.name + ".bak")
+    if existing:
+        target.write_bytes(b"old-target")
+        backup.write_bytes(b"old-backup")
+    expected_target = TargetSnapshot.capture(target)
+    expected_backup = TargetSnapshot.capture(backup)
+    external = target if changed == "target" else backup
+    external.write_bytes(b"external-change")
+    with pytest.raises(RuntimeError, match="changed"):
+        SelectionStore(tmp_path).save_to(
+            target, sample_document(source), source_path=source,
+            expected_target=expected_target, expected_backup=expected_backup,
+        )
+    assert external.read_bytes() == b"external-change"
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_save_rechecks_target_after_temp_validation(tmp_path, monkeypatch):
+    source = tmp_path / "sample.seq"
+    store = SelectionStore(tmp_path / "selections")
+    target = store.path_for(source)
+    original_dump = json.dump
+
+    def change_target_during_write(*args, **kwargs):
+        result = original_dump(*args, **kwargs)
+        target.write_bytes(b"external-file")
+        return result
+
+    monkeypatch.setattr(json, "dump", change_target_during_write)
+    with pytest.raises(RuntimeError, match="changed"):
+        store.save(source, sample_document(source))
+    assert target.read_bytes() == b"external-file"
+    assert not target.with_name(target.name + ".bak").exists()
+
+
+@pytest.mark.parametrize("location", ["target", "backup", "raw", "directory"])
+def test_selection_write_protection_precedes_temp_creation(tmp_path, location):
+    from flir_seq_tool.file_safety import TargetSnapshot
+
+    source = tmp_path / "source.seq"
+    source.write_bytes(b"source")
+    raw = tmp_path / "raw"
+    target = tmp_path / "config.selection.json"
+    if location == "target":
+        target = source
+    elif location == "raw":
+        target = raw / "nested" / "config.selection.json"
+    elif location == "directory":
+        target.mkdir()
+    backup = target.with_name(target.name + ".bak")
+    if location == "backup":
+        os.link(source, backup)
+    with pytest.raises(ValueError):
+        SelectionStore(tmp_path, raw_root=raw).save_to(
+            target, sample_document(source), source_path=source,
+            expected_target=TargetSnapshot.capture(target),
+            expected_backup=TargetSnapshot.capture(backup),
+        )
+    assert source.read_bytes() == b"source"
+    assert not raw.exists()
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("external_location", ["target", "backup"])
+def test_failed_selection_replace_does_not_clobber_external_recovery_changes(
+    tmp_path, monkeypatch, external_location,
+):
+    source = tmp_path / "source.seq"
+    store = SelectionStore(tmp_path)
+    first = sample_document(source)
+    target = store.save(source, first)
+    backup = target.with_name(target.name + ".bak")
+    external = target if external_location == "target" else backup
+    original_replace = os.replace
+
+    def fail_publish_with_external_change(src, dest):
+        if Path(src).suffix == ".tmp":
+            external.write_bytes(b"external-change")
+            raise OSError("injected publish failure")
+        return original_replace(src, dest)
+
+    monkeypatch.setattr(os, "replace", fail_publish_with_external_change)
+    with pytest.raises(RuntimeError, match="restore failed") as caught:
+        store.save(source, replace(first, display=DisplaySettings("viridis", 20, 40)))
+    assert external.read_bytes() == b"external-change"
+    assert str(target) in str(caught.value) and str(backup) in str(caught.value)
+
+
+def test_save_rolls_back_if_post_move_snapshot_fails(tmp_path, monkeypatch):
+    from flir_seq_tool.file_safety import TargetSnapshot
+
+    source = tmp_path / "source.seq"
+    store = SelectionStore(tmp_path)
+    doc = sample_document(source)
+    target = store.save(source, doc)
+    original_bytes = target.read_bytes()
+    backup = target.with_name(target.name + ".bak")
+    capture = TargetSnapshot.capture
+    failed = False
+
+    def fail_once(path):
+        nonlocal failed
+        if Path(path) == backup and backup.exists() and not target.exists() and not failed:
+            failed = True
+            raise OSError("injected stat failure")
+        return capture(path)
+
+    monkeypatch.setattr(TargetSnapshot, "capture", fail_once)
+    with pytest.raises(OSError, match="injected stat"):
+        store.save(source, doc)
+    assert target.read_bytes() == original_bytes
+
+
 def test_selection_store_replaces_config_and_keeps_one_backup(tmp_path: Path):
     source_path = tmp_path / "sample.seq"
     store = SelectionStore(tmp_path / "selections")

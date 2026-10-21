@@ -188,7 +188,7 @@ resize 回调使用画布英寸尺寸判断逻辑最小 10×8；低于此尺寸�
 
 文件：新增 `src/flir_seq_tool/file_safety.py`、`tests/unit/test_file_safety.py`；修改 `selection.py`、`extraction.py`、`tests/unit/test_selection.py`、`tests/unit/test_extraction.py`。
 
-- [ ] 在 `test_selection.py` 使用现有 `sample_document` 加入两套文件保存/加载失败测试：
+- [x] 在 `test_selection.py` 使用现有 `sample_document` 加入两套文件保存/加载失败测试：
 
 ```python
 def test_explicit_selection_path_round_trip(tmp_path):
@@ -208,8 +208,8 @@ def test_explicit_selection_path_round_trip(tmp_path):
     assert not store.path_for(source).exists()
 ```
 
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_selection.py -k explicit_selection_path -q`，预期缺少新方法而失败。
-- [ ] 将现有 `TargetSnapshot` 原样移入 `file_safety.py`，`extraction.py` 从新模块导入并保留模块层名称，保证旧导入兼容。新增以下公共保护函数：
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_selection.py -k explicit_selection_path -q`，预期缺少新方法而失败。
+- [x] 将现有 `TargetSnapshot` 原样移入 `file_safety.py`，`extraction.py` 从新模块导入并保留模块层名称，保证旧导入兼容。新增以下公共保护函数：
 
 ```python
 from pathlib import Path
@@ -233,7 +233,7 @@ def validate_write_path(path, *, source_path, raw_root):
 
 检查源路径、raw、目标父目录别名，以及 `.bak`；可用时测试 symlink/junction/hardlink，无法创建链接必须记录 skip 原因，不默认为已验证。保持现有导出目标必须直接位于 clips_root 的额外约束。
 
-- [ ] 增加 `SelectionStore.load_path(target, expected_source=None)`；将旧 load_expected 的“先验证源，再构造变换”搬入新入口。旧 load/load_expected 按 `path_for` 转调。
+- [x] 增加 `SelectionStore.load_path(target, expected_source=None)`；将旧 load_expected 的“先验证源，再构造变换”搬入新入口。旧 load/load_expected 按 `path_for` 转调。
 
 ```python
 def load_path(self, target, expected_source=None):
@@ -246,10 +246,10 @@ def load_path(self, target, expected_source=None):
     return SelectionDocument.from_dict(payload)
 ```
 
-- [ ] 增加 `SelectionStore.save_to(target, document, *, source_path, expected_target, expected_backup)`：保留现有写临时 JSON、flush/fsync、回读校验、单份 `.bak`、失败恢复流程；将 mkdir 改为已校验的 target.parent；在任何写入前和正式替换前核对两个快照及路径。目标变化不得覆盖。恢复前再次判断本事务目标仍空缺及备份仍为本次移入的文件，否则保留材料并报告完整路径。旧 `save(source_path, document)` 捕获当前两个快照后转调；不要求 source 必须存在，以兼容纯存储单元测试，但 GUI 的 source_identity 仍要求实际文件。
+- [x] 增加 `SelectionStore.save_to(target, document, *, source_path, expected_target, expected_backup)`：保留现有写临时 JSON、flush/fsync、回读校验、单份 `.bak`、失败恢复流程；将 mkdir 改为已校验的 target.parent；在任何写入前和正式替换前核对两个快照及路径。目标变化不得覆盖。恢复前再次判断本事务目标仍空缺及备份仍为本次移入的文件，否则保留材料并报告完整路径。旧 `save(source_path, document)` 捕获当前两个快照后转调；不要求 source 必须存在，以兼容纯存储单元测试，但 GUI 的 source_identity 仍要求实际文件。
 
-- [ ] 逐项加入失败测试：目标原不存在却被外部创建、目标被改写、备份被改写、源/raw/目录目标、final replace 失败、restore 失败、schema v1 只读兼容。目标外部变化断言其字节不变、无成功返回；保存失败不允许删除外部新文件。
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_file_safety.py tests/unit/test_selection.py tests/unit/test_extraction.py -q`。全部通过后提交：`feat: add guarded explicit selection paths`。
+- [x] 逐项加入失败测试：目标原不存在却被外部创建、目标被改写、备份被改写、源/raw/目录目标、final replace 失败、restore 失败、schema v1 只读兼容。目标外部变化断言其字节不变、无成功返回；保存失败不允许删除外部新文件。
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_file_safety.py tests/unit/test_selection.py tests/unit/test_extraction.py -q`。全部通过后提交：`feat: add guarded explicit selection paths`。
 
 ## 任务 4：原生对话框适配器
 
@@ -632,6 +632,8 @@ if ($seqTestExit -ne 0) { throw "pytest failed with exit code $seqTestExit" }
 完成后给用户：各任务提交、最新完整测试结果、原始文件只读验证、待人工确认项。由用户决定合并/推送/版本号；本计划不授权自动发布。
 
 ## 覆盖自查
+
+阶段验证补充：任务 2 提交 f50dabb。任务 3 的显式配置读写与快照保护已完成，目标回归 97 passed、2 skipped（1.22 s）；完整回归 347 passed、2 skipped（152.14 s），三份 raw 的大小/mtime 不变。跳过项为文件及目录符号链接创建，当前 Windows 返回 WinError 1314；硬链接保护通过。已复核并补上“旧文件移入备份后 stat 失败”的回滚测试。任务 4–10 尚未完成，尚未接通 GUI 文件选择，也未实现配套导出。
 
 | 设计要求 | 计划任务 |
 | --- | --- |

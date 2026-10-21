@@ -17,6 +17,7 @@ import fnv.file
 import numpy as np
 
 from .reader import ScienceFileReader
+from .file_safety import TargetSnapshot
 
 
 _ILLEGAL_WINDOWS_CHARS = re.compile(r'[<>:"/\\|?*]')
@@ -47,31 +48,6 @@ def normalize_clip_name(name: str) -> str:
     if value.split(".", 1)[0].upper() in _RESERVED_WINDOWS_NAMES:
         raise ValueError("clip name is a reserved Windows device name")
     return value
-
-
-@dataclass(frozen=True)
-class TargetSnapshot:
-    exists: bool
-    device: int | None = None
-    inode: int | None = None
-    size_bytes: int | None = None
-    modified_time_ns: int | None = None
-    created_time_ns: int | None = None
-
-    @classmethod
-    def capture(cls, path: Path) -> TargetSnapshot:
-        try:
-            stat = Path(path).stat()
-        except FileNotFoundError:
-            return cls(exists=False)
-        return cls(
-            exists=True,
-            device=stat.st_dev,
-            inode=stat.st_ino,
-            size_bytes=stat.st_size,
-            modified_time_ns=stat.st_mtime_ns,
-            created_time_ns=stat.st_ctime_ns,
-        )
 
 
 @dataclass(frozen=True)

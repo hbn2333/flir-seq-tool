@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .transform import CropRect, FrameTransform, RotationSettings
+from .file_safety import DEFAULT_RAW_ROOT, TargetSnapshot, assert_snapshot, validate_write_path
 
 
 SCHEMA_VERSION = 2
@@ -438,33 +439,57 @@ def validate_source_identity(expected: SourceIdentity, actual: SourceIdentity) -
 
 
 class SelectionStore:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, raw_root: Path = DEFAULT_RAW_ROOT) -> None:
         self.root = Path(root)
+        self.raw_root = Path(raw_root)
 
     def path_for(self, source_path: Path) -> Path:
         return self.root / f"{Path(source_path).stem}.selection.json"
 
     def load(self, source_path: Path) -> SelectionDocument:
-        target = self.path_for(source_path)
-        return SelectionDocument.from_dict(_read_payload(target))
+        return self.load_path(self.path_for(source_path))
 
     def load_expected(
         self, source_path: Path, expected_source: SourceIdentity
     ) -> SelectionDocument:
-        target = self.path_for(source_path)
-        payload, _ = _validate_root_version_and_keys(_read_payload(target))
+        return self.load_path(self.path_for(source_path), expected_source)
+
+    def load_path(
+        self, target: Path, expected_source: SourceIdentity | None = None
+    ) -> SelectionDocument:
+        payload, _ = _validate_root_version_and_keys(_read_payload(Path(target)))
         configured_source = SourceIdentity.from_dict(
             _require_mapping(payload["source"], "source")
         )
-        validate_source_identity(expected_source, configured_source)
+        if expected_source is not None:
+            validate_source_identity(expected_source, configured_source)
         return SelectionDocument.from_dict(payload)
 
     def save(self, source_path: Path, document: SelectionDocument) -> Path:
-        self.root.mkdir(parents=True, exist_ok=True)
         target = self.path_for(source_path)
+        return self.save_to(
+            target, document, source_path=source_path,
+            expected_target=TargetSnapshot.capture(target),
+            expected_backup=TargetSnapshot.capture(target.with_name(target.name + ".bak")),
+        )
+
+    def save_to(
+        self, target: Path, document: SelectionDocument, *, source_path: Path,
+        expected_target: TargetSnapshot, expected_backup: TargetSnapshot,
+    ) -> Path:
+        target = Path(target)
         backup = target.with_name(target.name + ".bak")
+        def check_paths() -> None:
+            validate_write_path(target, source_path=source_path, raw_root=self.raw_root)
+            validate_write_path(backup, source_path=source_path, raw_root=self.raw_root)
+
+        check_paths()
+        assert_snapshot(target, expected_target)
+        assert_snapshot(backup, expected_backup)
+        target.parent.mkdir(parents=True, exist_ok=True)
         temp_path: Path | None = None
         moved_old = False
+        moved_snapshot: TargetSnapshot | None = None
         try:
             with tempfile.NamedTemporaryFile(
                 mode="w",
@@ -488,15 +513,31 @@ class SelectionStore:
             if verified != document:
                 raise ValueError("selection verification mismatch")
 
-            if target.exists():
-                os.replace(target, backup)
-                moved_old = True
+            check_paths()
+            assert_snapshot(target, expected_target)
+            assert_snapshot(backup, expected_backup)
             try:
+                if expected_target.exists:
+                    os.replace(target, backup)
+                    moved_old = True
+                    moved_snapshot = TargetSnapshot.capture(backup)
+                assert_snapshot(target, TargetSnapshot(exists=False))
                 os.replace(temp_path, target)
                 temp_path = None
             except Exception as replace_error:
-                if moved_old and not target.exists() and backup.exists():
+                if moved_old:
                     try:
+                        check_paths()
+                        assert_snapshot(target, TargetSnapshot(exists=False))
+                        if moved_snapshot is not None:
+                            assert_snapshot(backup, moved_snapshot)
+                        else:
+                            # Rename may change ctime on some filesystems. The
+                            # original file identity/content must still match.
+                            actual = TargetSnapshot.capture(backup)
+                            for field in ("exists", "device", "inode", "size_bytes", "modified_time_ns"):
+                                if getattr(actual, field) != getattr(expected_target, field):
+                                    raise RuntimeError(f"backup changed during recovery: {backup}")
                         os.replace(backup, target)
                     except Exception as restore_error:
                         raise RuntimeError(
