@@ -303,6 +303,7 @@ class ViewerSession:
             start_timestamp=self.reader.timestamp_at(source_start),
             end_timestamp=self.reader.timestamp_at(source_end),
             source_num_frames=self.reader.num_frames,
+            selection_document=self.selection_document(),
         )
 
 
@@ -765,6 +766,7 @@ def build_viewer(
             )
             session.preview_frame(source_frame, transform)
             session.apply_transform(transform)
+            invalidate_export_confirmation()
         except (IndexError, ValueError, RuntimeError) as exc:
             set_error(f"Apply transform failed: {exc}")
             return

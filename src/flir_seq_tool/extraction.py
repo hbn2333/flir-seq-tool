@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import json
 import os
 import re
 import shutil
@@ -17,7 +18,9 @@ import fnv.file
 import numpy as np
 
 from .reader import ScienceFileReader
-from .file_safety import TargetSnapshot
+from .file_safety import TargetSnapshot, validate_write_path
+from .selection import SelectionDocument
+from .export_bundle import sidecar_path, pending_path
 
 
 _ILLEGAL_WINDOWS_CHARS = re.compile(r'[<>:"/\\|?*]')
@@ -63,6 +66,8 @@ class ExportRequest:
     source_size_bytes: int
     source_modified_time_ns: int
     target_snapshot: TargetSnapshot
+    selection_document: SelectionDocument | None = None
+    sidecar_snapshot: TargetSnapshot | None = None
 
     def __post_init__(self) -> None:
         if not 0 <= self.source_start_frame <= self.source_end_frame < self.source_num_frames:
@@ -71,6 +76,23 @@ class ExportRequest:
             raise ValueError("export timestamps must be ordered")
         if self.source_size_bytes < 0 or self.source_modified_time_ns < 0:
             raise ValueError("invalid source file identity")
+        self.validate_view()
+
+    def validate_view(self) -> None:
+        document = self.selection_document
+        if (document is None) != (self.sidecar_snapshot is None):
+            raise ValueError("paired export requires both document and sidecar snapshot")
+        if document is None:
+            return
+        source, selection = document.source, document.selection
+        if (source.filename, source.size_bytes, source.modified_time_ns, source.num_frames) != (
+            self.source_path.name, self.source_size_bytes, self.source_modified_time_ns, self.source_num_frames,
+        ):
+            raise ValueError("export document source identity mismatch")
+        if (selection.source_start_frame, selection.source_end_frame, selection.start_timestamp, selection.end_timestamp) != (
+            self.source_start_frame, self.source_end_frame, self.start_timestamp, self.end_timestamp,
+        ):
+            raise ValueError("export document selection mismatch")
 
     @property
     def frame_count(self) -> int:
@@ -91,6 +113,7 @@ def build_export_request(
     start_timestamp: datetime,
     end_timestamp: datetime,
     source_num_frames: int,
+    selection_document: SelectionDocument | None = None,
 ) -> ExportRequest:
     source = Path(source_path).resolve(strict=True)
     root = Path(clips_root).resolve()
@@ -109,6 +132,8 @@ def build_export_request(
         source_size_bytes=stat.st_size,
         source_modified_time_ns=stat.st_mtime_ns,
         target_snapshot=TargetSnapshot.capture(target),
+        selection_document=selection_document,
+        sidecar_snapshot=None if selection_document is None else TargetSnapshot.capture(sidecar_path(target)),
     )
 
 
@@ -149,6 +174,15 @@ def _validate_export_paths(
     protected = Path(DEFAULT_RAW_ROOT if raw_root is None else raw_root).resolve()
     if root.is_relative_to(protected) or target.is_relative_to(protected):
         raise ValueError("export target must not be written under raw")
+    validate_write_path(request.target_path, source_path=request.source_path, raw_root=protected)
+    request.validate_view()
+    if request.selection_document is not None:
+        for path in (sidecar_path(request.target_path), pending_path(request.target_path)):
+            resolved = validate_write_path(path, source_path=request.source_path, raw_root=protected)
+            if resolved.parent != root:
+                raise ValueError("paired output must be directly under clips root")
+        if pending_path(request.target_path).exists():
+            raise RuntimeError(f"unresolved export pending marker: {pending_path(request.target_path)}")
 
 
 def preflight_export(
@@ -178,8 +212,9 @@ def preflight_export(
             f"insufficient free space: {available} available, {required} required"
         )
     target_snapshot = TargetSnapshot.capture(request.target_path)
-    request = replace(request, target_snapshot=target_snapshot)
-    overwrite = target_snapshot.exists
+    sidecar_snapshot = None if request.selection_document is None else TargetSnapshot.capture(sidecar_path(request.target_path))
+    request = replace(request, target_snapshot=target_snapshot, sidecar_snapshot=sidecar_snapshot)
+    overwrite = target_snapshot.exists or (sidecar_snapshot is not None and sidecar_snapshot.exists)
     signature = (
         request.target_path.name,
         request.source_start_frame,
@@ -187,8 +222,10 @@ def preflight_export(
         work_source_range[0],
         work_source_range[1],
         target_snapshot,
+        sidecar_snapshot,
+        None if request.selection_document is None else json.dumps(request.selection_document.to_dict(), sort_keys=True),
     )
-    overwrite_text = "YES (OVERWRITE)" if overwrite else "NO"
+    overwrite_text = "YES (OVERWRITE)" if target_snapshot.exists else "NO"
     summary = (
         f"Target: {request.target_path}\n"
         f"Source frames: [{request.source_start_frame}, {request.source_end_frame}] | "
@@ -196,6 +233,9 @@ def preflight_export(
         f"Time: {request.start_timestamp.isoformat()} -> "
         f"{request.end_timestamp.isoformat()} | Existing target: {overwrite_text}"
     )
+    if sidecar_snapshot is not None:
+        summary += (f"\nSelection: {sidecar_path(request.target_path)} | Existing selection: "
+                    + ("YES (OVERWRITE)" if sidecar_snapshot.exists else "NO"))
     return ExportConfirmation(
         request=request,
         work_source_range=work_source_range,

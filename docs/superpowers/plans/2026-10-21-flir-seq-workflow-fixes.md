@@ -357,9 +357,9 @@ def test_save_dialog_cancel_keeps_dirty_state_and_writes_nothing(tmp_path):
 
 文件：新增 `src/flir_seq_tool/export_bundle.py`、`tests/unit/test_export_bundle.py`；修改 `extraction.py` 的 ExportRequest/build_export_request/preflight_export；修改 `viewer.py` 的 export_request、on_apply_transform；测试 `test_extraction.py`、`test_viewer.py`。
 
-- [ ] 先在 `test_viewer.py` 用 file-backed reader 建立色标后创建 request，断言 request 保存不可变 document，后续改变 session 不改变 request；保留现有原生帧范围/文件尺寸不受 transform 影响的测试，但不再断言请求完全不携带 transform。
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_viewer.py -k export_request -q`，确认新字段缺失导致失败。
-- [ ] ExportRequest 增加默认兼容字段 `selection_document: SelectionDocument | None = None`、`sidecar_snapshot: TargetSnapshot | None = None`；旧底层调用 None 继续单 SEQ 导出，GUI 总是传入 `self.selection_document()`，包括 identity。请求构造及 worker 入口校验 document 的源身份/尺寸/范围/时间与 request 一致；拒绝一半字段缺失或内容不一致。
+- [x] 先在 `test_viewer.py` 用 file-backed reader 建立色标后创建 request，断言 request 保存不可变 document，后续改变 session 不改变 request；保留现有原生帧范围/文件尺寸不受 transform 影响的测试，但不再断言请求完全不携带 transform。
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_viewer.py -k export_request -q`，确认新字段缺失导致失败。
+- [x] ExportRequest 增加默认兼容字段 `selection_document: SelectionDocument | None = None`、`sidecar_snapshot: TargetSnapshot | None = None`；旧底层调用 None 继续单 SEQ 导出，GUI 总是传入 `self.selection_document()`，包括 identity。请求构造及 worker 入口校验 document 的源身份/尺寸/范围/时间与 request 一致；拒绝一半字段缺失或内容不一致。
 
 ```python
 # export_bundle.py；无 extraction 的运行时导入，避免循环依赖
@@ -374,7 +374,7 @@ def pending_path(seq_path):
 
 `preflight_export` 同时检查两个目标与 pending；摘要固定列出 SEQ/selection 及各自覆盖状态。signature 加入冻结 document 的排序 JSON 和 sidecar_snapshot。不要只添加角度，温标、裁剪也必须使确认失效。Apply 后主动 invalidate_export_confirmation；第二次点击仍重新比对完整 signature。
 
-- [ ] 新增 `build_clip_document(partial_path, final_path, view_document, *, reader_factory)`：读取子 SEQ 尺寸、帧数、端点时间，用临时文件实际 size/mtime 和最终文件名创建 SourceIdentity，再用原 display/transform 与局部 `[0, N-1]` 创建 SelectionDocument。先比较维度、帧数、时间是否与冻结请求相符。该过程不得读取整段矩阵。
+- [x] 新增 `build_clip_document(partial_path, final_path, view_document, *, reader_factory)`：读取子 SEQ 尺寸、帧数、端点时间，用临时文件实际 size/mtime 和最终文件名创建 SourceIdentity，再用原 display/transform 与局部 `[0, N-1]` 创建 SelectionDocument。先比较维度、帧数、时间是否与冻结请求相符。该过程不得读取整段矩阵。
 
 ```python
 # 函数内：output 是 reader_factory(partial_path) 的上下文对象；
@@ -397,8 +397,8 @@ document = build_selection_document(
 )
 ```
 
-- [ ] 以可注入 reader 测试单帧/五帧、identity/非零旋转、固定温标、最终文件名、mtime、局部帧和绝对时间；reader 的 temperature_frame_at 设为抛错以证明此函数不请求温度矩阵。新增确认之后仅 JSON 外部变化会使确认失效测试。
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_export_bundle.py tests/unit/test_extraction.py tests/unit/test_viewer.py -q`，通过后提交：`feat: freeze view settings for paired SEQ export`。
+- [x] 以可注入 reader 测试单帧/五帧、identity/非零旋转、固定温标、最终文件名、mtime、局部帧和绝对时间；reader 的 temperature_frame_at 设为抛错以证明此函数不请求温度矩阵。新增确认之后仅 JSON 外部变化会使确认失效测试。
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_export_bundle.py tests/unit/test_extraction.py tests/unit/test_viewer.py -q`，通过后提交：`feat: freeze view settings for paired SEQ export`。
 
 ## 任务 7：有恢复标记的两文件发布
 
@@ -648,4 +648,6 @@ if ($seqTestExit -ne 0) { throw "pytest failed with exit code $seqTestExit" }
 | 最小真实源、三份 raw 前后核对、有界缓存 | 10 |
 | Git 分项提交、修正文档、用户验收后发布 | 全部任务及任务 10 |
 
-执行状态：任务 1–5 已实现并验证，任务 6–10 未完成。任务 1 提交 aab11a6；Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。任务 2 目标回归 131 passed（145.73 s），无警告；用 BoundedMessage 在绘制时按 renderer 宽度缩略，完整信息独立保存，F1 输出全文；长度拟合按测量比例收敛，避免逐字重复测量。最小真实 SEQ 的 1000×800 普通/编辑模式渲染图已检查，保存于忽略目录 picture/workflow-layout-20261021；三份 raw 的大小和纳秒 mtime 均未改变。Windows 原生窗口人工验收尚未完成。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。
+执行状态：任务 1–6 已实现并验证，任务 7–10 未完成。任务 1 提交 aab11a6；Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。任务 2 目标回归 131 passed（145.73 s），无警告；用 BoundedMessage 在绘制时按 renderer 宽度缩略，完整信息独立保存，F1 输出全文；长度拟合按测量比例收敛，避免逐字重复测量。最小真实 SEQ 的 1000×800 普通/编辑模式渲染图已检查，保存于忽略目录 picture/workflow-layout-20261021；三份 raw 的大小和纳秒 mtime 均未改变。Windows 原生窗口人工验收尚未完成。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。
+
+任务 5 提交 f7aabac。任务 6 目标回归 142 passed（159.59 s），请求冻结视图、确认同时覆盖两目标快照，子配置元数据验证不读取温度矩阵；两文件发布尚待任务 7–8。

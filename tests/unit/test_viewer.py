@@ -1139,14 +1139,20 @@ def test_f1_dialog_failure_remains_bounded_and_prints_cause(capsys):
         plt.close(ui.figure)
 
 
-def test_native_export_request_ignores_applied_transform(tmp_path):
+def test_native_export_request_freezes_view_without_changing_native_range(tmp_path):
     reader = FileBackedFakeReader(make_frames(count=3), tmp_path / "sample.seq")
     session = ViewerSession(reader)
     session.apply_transform(session.applied_transform.with_angle(10.0))
+    session.frame_at(0)
 
     request = session.export_request("raw_clip", tmp_path / "clips")
 
-    assert not hasattr(request, "transform")
+    frozen = request.selection_document
+    assert frozen.transform == session.applied_transform
+    session.apply_transform(FrameTransform.identity(reader.width, reader.height))
+    assert request.selection_document == frozen
+    assert request.selection_document.transform != session.applied_transform
+    assert request.sidecar_snapshot.exists is False
     assert request.source_start_frame == 0
     assert request.source_end_frame == 2
 
@@ -1246,6 +1252,7 @@ def test_export_second_click_starts_job_locks_controls_and_poll_restores(tmp_pat
 def test_running_export_refuses_transform_editing(tmp_path):
     reader = FileBackedFakeReader(make_frames(count=3), tmp_path / "sample.seq")
     session = ViewerSession(reader)
+    session.frame_at(0)
     job = FakeExportJob(session.export_request("useful", tmp_path / "clips"))
     ui = build_viewer(session)
     ui.export_state.job = job
