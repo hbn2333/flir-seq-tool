@@ -499,11 +499,11 @@ class SelectionStore:
                 dir=target.parent,
                 delete=False,
             ) as stream:
+                temp_path = Path(stream.name)
                 json.dump(document.to_dict(), stream, ensure_ascii=False, indent=2)
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
-                temp_path = Path(stream.name)
 
             verified = SelectionDocument.from_dict(
                 _require_mapping(

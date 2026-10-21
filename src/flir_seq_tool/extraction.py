@@ -556,7 +556,7 @@ def run_export(
     finally:
         handle.clear()
         for temporary in (partial if not replaced else None, selection_temp):
-            if temporary is not None and temporary not in retained:
+            if temporary is not None and temporary.absolute() not in retained:
                 try:
                     temporary.unlink(missing_ok=True)
                 except OSError as exc:

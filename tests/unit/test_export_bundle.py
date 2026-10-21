@@ -529,3 +529,34 @@ def test_worker_rechecks_source_metadata_before_sdk(tmp_path):
     assert result.status is extraction.ExportStatus.FAILED
     assert "source mismatch: width" in result.message
     assert not request.clips_root.exists()
+
+
+def test_worker_relative_paths_do_not_delete_retained_recovery_materials(tmp_path, monkeypatch):
+    from flir_seq_tool import extraction
+    import flir_seq_tool.export_bundle as bundle
+    request = paired_request(tmp_path)
+    request.clips_root.mkdir()
+    request.target_path.write_bytes(b"old seq")
+    request = confirm(request).request
+    monkeypatch.chdir(tmp_path)
+    request = replace(request, target_path=request.target_path.relative_to(tmp_path), clips_root=Path("clips"))
+    kwargs = worker_kwargs(request)
+    original_publish = extraction.publish_bundle
+    original_replace = bundle.os.replace
+    def fail_restore(src, dst):
+        if Path(src).suffix == ".recovery":
+            raise OSError("restore denied")
+        return original_replace(src, dst)
+    def publish(**kw):
+        def reject(*_):
+            raise ValueError("verify rejected")
+        kw["verify_pair"] = reject
+        return original_publish(**kw)
+    monkeypatch.setattr(bundle.os, "replace", fail_restore)
+    monkeypatch.setattr(extraction, "publish_bundle", publish)
+    result = extraction.run_export(request, **kwargs)
+    assert result.status is extraction.ExportStatus.FAILED
+    assert bundle.pending_path(request.target_path).exists()
+    retained_seq = list(request.clips_root.glob("*.partial.seq"))
+    assert len(retained_seq) == 1
+    assert retained_seq[0].read_bytes() == b"native child"

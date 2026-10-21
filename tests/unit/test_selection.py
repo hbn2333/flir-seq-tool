@@ -46,6 +46,23 @@ def sample_document(path: Path) -> SelectionDocument:
     )
 
 
+def test_partial_json_write_failure_cleans_its_temporary_file(tmp_path, monkeypatch):
+    source = tmp_path / "sample.seq"
+    source.write_bytes(b"source")
+    store = SelectionStore(tmp_path / "selections")
+    document = sample_document(source)
+    target = store.save(source, document)
+    original = target.read_bytes()
+    def fail_dump(payload, stream, **kwargs):
+        stream.write("partial")
+        raise OSError("disk full")
+    monkeypatch.setattr(selection_module.json, "dump", fail_dump)
+    with pytest.raises(OSError, match="disk full"):
+        store.save(source, document)
+    assert target.read_bytes() == original
+    assert list(store.root.iterdir()) == [target]
+
+
 def test_selection_document_round_trip_uses_iso_timestamps(tmp_path: Path):
     document = sample_document(tmp_path / "sample.seq")
 
