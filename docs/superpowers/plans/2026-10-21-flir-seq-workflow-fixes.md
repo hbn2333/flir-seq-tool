@@ -567,7 +567,7 @@ restore_startup 的顺序：先校验 CLI 参数（温标必须成对、有限�
 
 文件：新增 `tests/integration/conftest.py`；修改两个最小真实数据测试文件、README.md、CHANGELOG.md、docs/KNOWN_ISSUES.md、docs/MAINTENANCE.md。
 
-- [ ] 在 integration 下增加 autouse fixture，保护所有真实 raw SEQ，即使失败也执行比较；fixture 不读取大文件内容，只 stat：
+- [x] 在 integration 下增加 autouse fixture，保护所有真实 raw SEQ，即使失败也执行比较；fixture 不读取大文件内容，只 stat：
 
 ```python
 from pathlib import Path
@@ -591,10 +591,10 @@ def preserve_raw_sources():
         assert raw_metadata() == before, "raw SEQ metadata changed"
 ```
 
-- [ ] 使用唯一最小真实源建立 session，读取首帧初始化温标，设置 pending `[10,14]`，应用 `FrameTransform.identity(width,height).with_angle(-2.3)` 的有效默认裁剪，创建带 document 的导出请求。通过 preflight 后在 tmp_path 下运行 ExportJob（不写正式 clips）。等待线程时使用有界 join 并断言结束；失败时 result.message 必须出现在断言中。
-- [ ] 重新打开导出的五帧 SEQ 并调用 restore_startup；断言局部 `[0,4]`、真实首末时间不变、源尺寸不变、应用变换/色图/温标一致。比较重新打开的第 0/2/4 帧变换结果与原 session 第 10/12/14 帧，使用 `np.testing.assert_allclose(reopened_frame.temperature_c, original_frame.temperature_c, rtol=1e-6, atol=1e-4, equal_nan=True)`，且缓存 maxsize 不变。确认最终配置绑定子文件而非源文件、pending 不存在。
-- [ ] 执行 `& $seqPython -m pytest tests/integration/test_small_seq_extract.py tests/integration/test_small_seq_viewer.py -q`。预期真实 SDK 用例全部通过，fixture 在通过/失败均检查三份 raw 元数据；若 SDK 不可用或 source 缺失，记录阻塞，不用模拟结果替代真实通过。
-- [ ] 执行完整回归，并在整个 pytest 进程之外额外比较 raw 列表、大小与时间，覆盖单元测试阶段。以下 PowerShell 中 Ticks 为 Windows 100 ns 时间单位，integration fixture 另以 st_mtime_ns 比较。保存实际用例数、耗时、skip 原因及前后元数据；首次失败先诊断，不通过删测试/放宽温度误差消除失败。
+- [x] 使用唯一最小真实源建立 session，读取首帧初始化温标，设置 pending `[10,14]`，应用 `FrameTransform.identity(width,height).with_angle(-2.3)` 的有效默认裁剪，创建带 document 的导出请求。通过 preflight 后在 tmp_path 下运行 ExportJob（不写正式 clips）。等待线程时使用有界 join 并断言结束；失败时 result.message 必须出现在断言中。
+- [x] 重新打开导出的五帧 SEQ 并调用 restore_startup；断言局部 `[0,4]`、真实首末时间不变、源尺寸不变、应用变换/色图/温标一致。比较重新打开的第 0/2/4 帧变换结果与原 session 第 10/12/14 帧，使用 `np.testing.assert_allclose(reopened_frame.temperature_c, original_frame.temperature_c, rtol=1e-6, atol=1e-4, equal_nan=True)`，且缓存 maxsize 不变。确认最终配置绑定子文件而非源文件、pending 不存在。
+- [x] 执行 `& $seqPython -m pytest tests/integration/test_small_seq_extract.py tests/integration/test_small_seq_viewer.py -q`。预期真实 SDK 用例全部通过，fixture 在通过/失败均检查三份 raw 元数据；若 SDK 不可用或 source 缺失，记录阻塞，不用模拟结果替代真实通过。
+- [x] 执行完整回归，并在整个 pytest 进程之外额外比较 raw 列表、大小与时间，覆盖单元测试阶段。以下 PowerShell 中 Ticks 为 Windows 100 ns 时间单位，integration fixture 另以 st_mtime_ns 比较。保存实际用例数、耗时、skip 原因及前后元数据；首次失败先诊断，不通过删测试/放宽温度误差消除失败。
 
 ```powershell
 function Get-SeqRawMetadata {
@@ -616,9 +616,9 @@ if ($seqTestExit -ne 0) { throw "pytest failed with exit code $seqTestExit" }
 ```
 
 预期 pytest 退出码 0、前后元数据相同。仅在全套完成后报告验证结论。
-- [ ] 更新文档：0.1.0 已提交并标记在 2b1a5d7，不称 GitHub Release 已创建；新增 Unreleased 修复项。KNOWN_ISSUES 区分“代码/自动测试通过”与“等待人工验收”，记录真实命令及结果。README 给出 Apply → Save selection（保存方案）、Export sub-SEQ（直接输出两文件，无须先 Save）与自动恢复流程；注明其他软件只看原像素、缺少 sidecar 显示原视图、改名/mtime可能破坏身份、pending 禁止套用、F1 完整详情。MAINTENANCE 说明独立仓库/修复分支状态，不保留仍等待首次 git init 的过期操作。
-- [ ] 执行文档差异检查及完整代码复核。重点复核路径保护、两个目标快照、回滚外部文件保护、取消临界区、读取失败原子性、首次绘制恢复、逐帧内存。不因测试全绿而跳过复核；复核修复须重新跑受影响测试和完整回归。
-- [ ] 仅提交对应测试与文档：`test: verify paired SEQ workflow and document maintenance`。
+- [x] 更新文档：0.1.0 已提交并标记在 2b1a5d7，不称 GitHub Release 已创建；新增 Unreleased 修复项。KNOWN_ISSUES 区分“代码/自动测试通过”与“等待人工验收”，记录真实命令及结果。README 给出 Apply → Save selection（保存方案）、Export sub-SEQ（直接输出两文件，无须先 Save）与自动恢复流程；注明其他软件只看原像素、缺少 sidecar 显示原视图、改名/mtime可能破坏身份、pending 禁止套用、F1 完整详情。MAINTENANCE 说明独立仓库/修复分支状态，不保留仍等待首次 git init 的过期操作。
+- [x] 执行文档差异检查及完整代码复核。重点复核路径保护、两个目标快照、回滚外部文件保护、取消临界区、读取失败原子性、首次绘制恢复、逐帧内存。不因测试全绿而跳过复核；复核修复须重新跑受影响测试和完整回归。
+- [x] 仅提交对应测试与文档：`test: verify paired SEQ workflow and document maintenance`。
 
 ### 人工验收交接（不自动代用户勾选）
 
@@ -631,9 +631,7 @@ if ($seqTestExit -ne 0) { throw "pytest failed with exit code $seqTestExit" }
 
 完成后给用户：各任务提交、最新完整测试结果、原始文件只读验证、待人工确认项。由用户决定合并/推送/版本号；本计划不授权自动发布。
 
-## 覆盖自查
-
-阶段验证补充：任务 2 提交 f50dabb。任务 3 的显式配置读写与快照保护已完成，目标回归 97 passed、2 skipped（1.22 s）；完整回归 347 passed、2 skipped（152.14 s），三份 raw 的大小/mtime 不变。跳过项为文件及目录符号链接创建，当前 Windows 返回 WinError 1314；硬链接保护通过。已复核并补上“旧文件移入备份后 stat 失败”的回滚测试。任务 4 原生对话框适配器已完成（f9c256f，14 passed）；任务 5 已接通 GUI 文件选择，目标回归 160 passed（164.14 s）。已覆盖取消、两套配置、覆盖拒绝、外部改动、损坏配置与 F1 后端失败；尚未实现配套导出。
+## 覆盖自查与执行记录
 
 | 设计要求 | 计划任务 |
 | --- | --- |
@@ -648,12 +646,24 @@ if ($seqTestExit -ne 0) { throw "pytest failed with exit code $seqTestExit" }
 | 最小真实源、三份 raw 前后核对、有界缓存 | 10 |
 | Git 分项提交、修正文档、用户验收后发布 | 全部任务及任务 10 |
 
-执行状态：任务 1–9 已实现并验证，任务 10 未完成。任务 1 提交 aab11a6；Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。任务 2 目标回归 131 passed（145.73 s），无警告；用 BoundedMessage 在绘制时按 renderer 宽度缩略，完整信息独立保存，F1 输出全文；长度拟合按测量比例收敛，避免逐字重复测量。最小真实 SEQ 的 1000×800 普通/编辑模式渲染图已检查，保存于忽略目录 picture/workflow-layout-20261021；三份 raw 的大小和纳秒 mtime 均未改变。Windows 原生窗口人工验收尚未完成。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。
+任务 1–10 的代码、测试及文档已完成；上方人工验收项仍未勾选。main/origin/main/本地 v0.1.0 均保持 2b1a5d7，本轮未合并、推送或新建发布标签。按用户选择在同一工作目录顺序执行和复核，没有并行代理。
 
-任务 5 提交 f7aabac。任务 6 目标回归 142 passed（159.59 s），请求冻结视图、确认同时覆盖两目标快照，子配置元数据验证不读取温度矩阵；两文件发布尚待任务 7–8。
+| 任务 | 本地提交 | 验证与说明 |
+| --- | --- | --- |
+| 1 布局 | aab11a6 | 120 passed（112.68 s）；Total 框依据 renderer 测试下移，避免 1000×800 下标签接触滑块。 |
+| 2 长消息/详情 | f50dabb | 131 passed（145.73 s）；按 renderer 宽度拟合，保存全文；真实普通/编辑渲染图在忽略目录 picture/workflow-layout-20261021。 |
+| 3 配置路径/保护 | 915ad60 | 97 passed、2 skipped；阶段完整回归 347 passed、2 skipped（152.14 s），raw 元数据不变。 |
+| 4 对话框适配器 | f9c256f | 14 passed；替身覆盖线程、取消、异常和临时 root 清理。 |
+| 5 GUI Save/Load | f7aabac | 160 passed（164.14 s）；不再两次点击加载。 |
+| 6 冻结导出视图 | da0cdfc | 142 passed（159.59 s）；子配置生成只读元数据。 |
+| 7 两文件发布 | cd6f552 | 44 passed、2 skipped（3.44 s）；故障回滚、外部改动及保留材料。 |
+| 8 后台/取消门 | ea1cb3f | 185 passed（142.97 s）；正式 pair 校验、发布期禁取消、临时清理异常反馈。 |
+| 9 启动恢复 | 9467f43 | 174 passed（156.43 s）；v1/v2、首次绘制前恢复、pending、CLI 优先级。 |
+| 最终复核修正 | bf62f59 | 两个新增失败测试复现 JSON 部分写入遗留和相对路径误清理；修正后 104 passed（4.55 s）。 |
+| 10 真实集成/交付 | 本次测试与文档提交 | 最小真实配套及查看器 6 passed（8.97 s）；最终完整回归 448 passed、2 skipped（167.34 s）。 |
 
-任务 6 提交 da0cdfc。任务 7 目标回归 44 passed、2 skipped（3.44 s，符号链接权限同上）；覆盖 journal、保护/发布改名、回滚、清理失败，及外部目标/恢复材料改写。恢复失败保留 pending 和材料；最终验证通过后的清理失败不会回滚新输出。
+最终命令：`python -m pytest -q -rs -p no:cacheprovider`。关闭缓存插件避免本机缓存目录权限告警；不跳过测试。两项 skip 为当前 Windows 创建文件/目录符号链接的权限不足（WinError 1314），硬链接保护通过。
 
-任务 7 提交 cd6f552。任务 8 目标回归 185 passed（142.97 s），后台配套、发布取消门、正式输出校验及保留材料已接通；临时文件清理异常转为带完整路径的失败结果。自动启动恢复和真实配套集成尚待任务 9–10。
+集成 fixture 在 finally 比较所有 raw 的大小/纳秒 mtime，完整 pytest 外层另比较文件列表、大小与 Windows UTC Ticks。三份原始 SEQ 全部不变；只从最小源读取温度和提取第 10–14 帧，大文件仅 stat。真实子 SEQ 重开自动恢复 -2.3° 及有效裁剪、23–45 °C 固定温标和 magma 色图；第 0/2/4 帧与原第 10/12/14 帧的变换温度在 rtol=1e-6、atol=1e-4、equal_nan=True 下匹配，缓存上限仍为 3。
 
-任务 8 提交 ea1cb3f。任务 9 目标回归 174 passed（156.43 s）。启动只检查同目录同名配置，v1/v2 在首次绘制前恢复；pending 同时阻止自动与手动套用；CLI 先验证后覆盖，并正确处理源帧与局部帧。温标倒序的原错误文字已保留。
+复核范围包括路径保护、两目标快照、失败回滚所有权、取消临界区、读取失败状态原子性、首次绘制和逐帧内存。未使用独立代理复核；Windows 原生窗口/弹窗和大文件性能尚未人工验证。详细验收步骤及 raw 元数据见 docs/KNOWN_ISSUES.md。

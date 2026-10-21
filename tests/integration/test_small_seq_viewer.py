@@ -90,20 +90,25 @@ def test_small_seq_time_range_uses_source_frames_and_real_timestamps():
 
 
 def test_small_seq_selection_round_trip_preserves_source(tmp_path):
+    from types import SimpleNamespace
     with ScienceFileReader(SMALL_SEQ) as reader:
         session = ViewerSession(
             reader,
             cache_size=3,
             selection_store=SelectionStore(tmp_path / "selections"),
         )
-        ui = build_viewer(session, initial_frame=0)
+        target = session.selection_store.path_for(reader.path)
+        dialogs = SimpleNamespace(
+            choose_save=lambda *_: target, choose_load=lambda *_: target,
+            confirm=lambda *_: True,
+        )
+        ui = build_viewer(session, initial_frame=0, dialogs=dialogs)
         try:
             ui.range_slider.set_val((10, 20))
             ui.save_button._observers.process("clicked", None)
             ui.reset_button._observers.process("clicked", None)
             ui.load_button._observers.process("clicked", None)
-            assert ui.load_button.label.get_text() == "Confirm load"
-            ui.load_button._observers.process("clicked", None)
+            assert ui.load_button.label.get_text() == "Load selection"
 
             assert (session.timeline.source_start, session.timeline.source_end) == (
                 10,
