@@ -1265,6 +1265,25 @@ def test_running_export_refuses_transform_editing(tmp_path):
     plt.close(ui.figure)
 
 
+def test_publishing_disables_cancel_and_shows_finalization_status(tmp_path):
+    reader = FileBackedFakeReader(make_frames(count=3), tmp_path / "sample.seq")
+    session = ViewerSession(reader)
+    ui = build_viewer(session)
+    try:
+        job = FakeExportJob(session.export_request("useful", tmp_path / "clips"))
+        ui.export_state.job = job
+        job.start()
+        job.progress.update(message="Finalizing paired files; please wait", cancel_allowed=False)
+        job.cancel = lambda: False
+        ui.poll_export()
+        assert not ui.cancel_button.active
+        assert "Finalizing paired files" in ui.message_details["progress"]
+        ui.cancel_button._observers.process("clicked", None)
+        assert "Cancellation requested" not in ui.export_text.get_text()
+    finally:
+        plt.close(ui.figure)
+
+
 def test_transform_editing_blocks_all_normal_mode_handlers_but_apply_works(
     tmp_path, monkeypatch
 ):

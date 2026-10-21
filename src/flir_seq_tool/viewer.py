@@ -867,8 +867,10 @@ def build_viewer(
         job = export_state.job
         if job is None or not job.is_alive():
             return
-        job.cancel()
-        export_text.set_text("Cancellation requested; waiting for FileSDK to stop.")
+        if job.cancel() is False:
+            export_text.set_text("Finalizing paired files; cancellation is no longer available.")
+        else:
+            export_text.set_text("Cancellation requested; waiting for FileSDK to stop.")
         figure.canvas.draw_idle()
 
     def poll_export() -> None:
@@ -876,13 +878,14 @@ def build_viewer(
         if job is None:
             return
         snapshot = job.progress.snapshot()
+        cancel_button.set_active(job.is_alive() and snapshot.cancel_allowed)
         if snapshot.total > 0:
             percent = 100.0 * snapshot.current / snapshot.total
             progress_text.set_text(
-                f"Progress: {snapshot.current}/{snapshot.total} ({percent:.1f}%)"
+                f"Progress: {snapshot.current}/{snapshot.total} ({percent:.1f}%) | {snapshot.message}"
             )
         else:
-            progress_text.set_text(f"Status: {snapshot.status.value}")
+            progress_text.set_text(f"Status: {snapshot.status.value} | {snapshot.message}")
         if job.is_alive():
             figure.canvas.draw_idle()
             return

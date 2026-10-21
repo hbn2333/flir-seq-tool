@@ -18,9 +18,12 @@ import fnv.file
 import numpy as np
 
 from .reader import ScienceFileReader
-from .file_safety import TargetSnapshot, validate_write_path
-from .selection import SelectionDocument
-from .export_bundle import sidecar_path, pending_path
+from .file_safety import TargetSnapshot, validate_write_path, assert_snapshot
+from .selection import SelectionDocument, SelectionStore, validate_source_identity
+from .export_bundle import (
+    sidecar_path, pending_path, build_clip_document, read_seq_identity,
+    publish_bundle, BundlePublishError,
+)
 
 
 _ILLEGAL_WINDOWS_CHARS = re.compile(r'[<>:"/\\|?*]')
@@ -260,6 +263,7 @@ class ExportProgressSnapshot:
     current: int
     total: int
     message: str
+    cancel_allowed: bool = True
 
 
 @dataclass
@@ -268,6 +272,7 @@ class ExportProgress:
     _current: int = 0
     _total: int = 0
     _message: str = ""
+    _cancel_allowed: bool = True
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def update(
@@ -277,6 +282,7 @@ class ExportProgress:
         current: int | None = None,
         total: int | None = None,
         message: str | None = None,
+        cancel_allowed: bool | None = None,
     ) -> None:
         with self._lock:
             if status is not None:
@@ -287,11 +293,13 @@ class ExportProgress:
                 self._total = int(total)
             if message is not None:
                 self._message = message
+            if cancel_allowed is not None:
+                self._cancel_allowed = cancel_allowed
 
     def snapshot(self) -> ExportProgressSnapshot:
         with self._lock:
             return ExportProgressSnapshot(
-                self._status, self._current, self._total, self._message
+                self._status, self._current, self._total, self._message, self._cancel_allowed
             )
 
 
@@ -306,6 +314,24 @@ class ExportAbortHandle:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._options: Any | None = None
+        self._publishing = False
+
+    def begin_publish(self, cancel_event: threading.Event) -> bool:
+        with self._lock:
+            if cancel_event.is_set():
+                return False
+            self._publishing = True
+            return True
+
+    def request_cancel(self, cancel_event: threading.Event) -> bool:
+        with self._lock:
+            if self._publishing:
+                return False
+            cancel_event.set()
+            options = self._options
+        if options is not None:
+            options.abort()
+        return True
 
     def set_options(self, options: Any, cancel_event: threading.Event) -> None:
         with self._lock:
@@ -386,6 +412,10 @@ def validate_extracted_seq(
         raise ValueError("source file identity changed during validation")
 
 
+class _ExportCancelled(Exception):
+    pass
+
+
 def run_export(
     request: ExportRequest,
     *,
@@ -395,18 +425,24 @@ def run_export(
     options_factory: Callable[[], Any] = fnv.file.ImagerFileExtractOptions,
     validator: Callable[[ExportRequest, Path], None],
     abort_handle: ExportAbortHandle | None = None,
+    reader_factory: Callable[[Path], Any] = ScienceFileReader,
 ) -> ExportResult:
     partial: Path | None = None
+    selection_temp: Path | None = None
+    retained: set[Path] = set()
+    publishing = False
+    handle = abort_handle or ExportAbortHandle()
     replaced = False
+    cleanup_errors: list[str] = []
     progress.update(status=ExportStatus.RUNNING, message="Extracting")
 
     try:
         _validate_export_paths(request)
+        if request.selection_document is not None:
+            validate_source_identity(request.selection_document.source,
+                                     read_seq_identity(request.source_path, reader_factory=reader_factory))
         if cancel_event.is_set():
-            progress.update(status=ExportStatus.CANCELLED, message="Export cancelled")
-            return ExportResult(
-                ExportStatus.CANCELLED, request.target_path, "Export cancelled"
-            )
+            raise _ExportCancelled()
 
         request.target_path.parent.mkdir(parents=True, exist_ok=True)
         partial_base = request.target_path.with_name(
@@ -419,8 +455,7 @@ def run_export(
         options.decimation = 1
         options.preset = -1
         options.preferredFormat = "SEQ-FFF"
-        if abort_handle is not None:
-            abort_handle.set_options(options, cancel_event)
+        handle.set_options(options, cancel_event)
 
         def on_progress(current: int, total: int) -> bool:
             progress.update(current=current, total=total)
@@ -432,24 +467,33 @@ def run_export(
             extracted = bool(imager.extract(str(partial_base), options))
         finally:
             imager.close()
-            if abort_handle is not None:
-                abort_handle.clear()
+            handle.clear()
 
         if cancel_event.is_set():
-            progress.update(status=ExportStatus.CANCELLED, message="Export cancelled")
-            return ExportResult(
-                ExportStatus.CANCELLED, request.target_path, "Export cancelled"
-            )
+            raise _ExportCancelled()
         if not extracted:
             raise RuntimeError("FileSDK extract returned false")
 
         progress.update(message="Validating extracted SEQ")
         validator(request, partial)
-        if cancel_event.is_set():
-            progress.update(status=ExportStatus.CANCELLED, message="Export cancelled")
-            return ExportResult(
-                ExportStatus.CANCELLED, request.target_path, "Export cancelled"
+        child_document = None
+        if request.selection_document is not None:
+            progress.update(message="Preparing paired view configuration")
+            child_document = build_clip_document(
+                partial, request.target_path, request.selection_document, reader_factory=reader_factory,
             )
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=request.clips_root,
+                                             prefix=f"{request.target_path.stem}.", suffix=".partial.json",
+                                             delete=False) as stream:
+                selection_temp = Path(stream.name)
+                json.dump(child_document.to_dict(), stream, indent=2, allow_nan=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            loaded = SelectionDocument.from_dict(json.loads(selection_temp.read_text(encoding="utf-8")))
+            if loaded != child_document:
+                raise ValueError("prepared view configuration mismatch")
+        if cancel_event.is_set():
+            raise _ExportCancelled()
         current_source = request.source_path.stat()
         if (
             current_source.st_size != request.source_size_bytes
@@ -460,27 +504,68 @@ def run_export(
             raise RuntimeError(
                 "target changed after export confirmation; refusing replacement"
             )
-        os.replace(partial, request.target_path)
+        if request.selection_document is not None:
+            validate_source_identity(request.selection_document.source,
+                                     read_seq_identity(request.source_path, reader_factory=reader_factory))
+            assert_snapshot(sidecar_path(request.target_path), request.sidecar_snapshot)
+        if not handle.begin_publish(cancel_event):
+            raise _ExportCancelled()
+        publishing = True
+        progress.update(cancel_allowed=False, message="Finalizing paired files; please wait" if child_document else "Finalizing SEQ; please wait")
+        warnings: tuple[str, ...] = ()
+        if child_document is not None:
+            def verify_pair(seq: Path, config: Path) -> None:
+                identity = read_seq_identity(seq, reader_factory=reader_factory)
+                validate_source_identity(child_document.source, identity)
+                saved = SelectionStore(config.parent).load_path(config, identity)
+                if saved != child_document:
+                    raise ValueError("published pair configuration mismatch")
+            outcome = publish_bundle(
+                source_path=request.source_path, raw_root=DEFAULT_RAW_ROOT,
+                seq_temp=partial, selection_temp=selection_temp, seq_target=request.target_path,
+                expected_seq=request.target_snapshot, expected_selection=request.sidecar_snapshot,
+                verify_pair=verify_pair,
+            )
+            warnings = outcome.warnings
+        else:
+            os.replace(partial, request.target_path)
         replaced = True
         message = f"Exported: {request.target_path}"
+        if child_document is not None:
+            message += f"\nView configuration: {sidecar_path(request.target_path)}"
+        if warnings:
+            message += "\n" + "\n".join(warnings)
         progress.update(
             status=ExportStatus.SUCCEEDED,
             current=request.frame_count,
             total=request.frame_count,
             message=message,
         )
-        return ExportResult(ExportStatus.SUCCEEDED, request.target_path, message)
+        result = ExportResult(ExportStatus.SUCCEEDED, request.target_path, message)
     except Exception as exc:
-        if cancel_event.is_set():
-            message = f"Export cancelled: {exc}"
+        if isinstance(exc, BundlePublishError):
+            retained.update(exc.retained_paths)
+        if cancel_event.is_set() and not publishing:
+            message = "Export cancelled" if isinstance(exc, _ExportCancelled) else f"Export cancelled: {exc}"
             progress.update(status=ExportStatus.CANCELLED, message=message)
-            return ExportResult(ExportStatus.CANCELLED, request.target_path, message)
-        message = f"Export failed: {exc}"
-        progress.update(status=ExportStatus.FAILED, message=message)
-        return ExportResult(ExportStatus.FAILED, request.target_path, message)
+            result = ExportResult(ExportStatus.CANCELLED, request.target_path, message)
+        else:
+            message = f"Export failed: {exc}"
+            progress.update(status=ExportStatus.FAILED, message=message)
+            result = ExportResult(ExportStatus.FAILED, request.target_path, message)
     finally:
-        if partial is not None and not replaced:
-            partial.unlink(missing_ok=True)
+        handle.clear()
+        for temporary in (partial if not replaced else None, selection_temp):
+            if temporary is not None and temporary not in retained:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError as exc:
+                    cleanup_errors.append(f"Temporary file retained: {temporary}: {exc}")
+    if cleanup_errors:
+        message = result.message + "\n" + "\n".join(cleanup_errors)
+        progress.update(status=ExportStatus.FAILED, message=message)
+        result = ExportResult(ExportStatus.FAILED, request.target_path, message)
+    return result
 
 
 class ExportJob:
@@ -491,6 +576,7 @@ class ExportJob:
         imager_factory: Callable[[str], Any] = fnv.file.ImagerFile,
         options_factory: Callable[[], Any] = fnv.file.ImagerFileExtractOptions,
         validator: Callable[[ExportRequest, Path], None] = validate_extracted_seq,
+        reader_factory: Callable[[Path], Any] = ScienceFileReader,
     ) -> None:
         self.request = request
         self.progress = ExportProgress()
@@ -500,6 +586,7 @@ class ExportJob:
         self._imager_factory = imager_factory
         self._options_factory = options_factory
         self._validator = validator
+        self._reader_factory = reader_factory
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -521,14 +608,15 @@ class ExportJob:
             options_factory=self._options_factory,
             validator=self._validator,
             abort_handle=self._abort_handle,
+            reader_factory=self._reader_factory,
         )
 
-    def cancel(self) -> None:
-        self.cancel_event.set()
+    def cancel(self) -> bool:
         try:
-            self._abort_handle.abort()
+            return self._abort_handle.request_cancel(self.cancel_event)
         except Exception as exc:
             self.progress.update(message=f"Cancellation requested: {exc}")
+            return True  # The event was accepted before the SDK abort raised.
 
     def is_alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()

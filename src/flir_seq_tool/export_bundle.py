@@ -20,6 +20,16 @@ def pending_path(seq_path: Path) -> Path:
     return Path(seq_path).with_suffix(".export-pending.json")
 
 
+def read_seq_identity(path: Path, *, reader_factory: Callable[[Path], Any]) -> SourceIdentity:
+    with reader_factory(path) as reader:
+        stat = Path(path).stat()
+        return SourceIdentity(
+            filename=Path(path).name, size_bytes=stat.st_size, modified_time_ns=stat.st_mtime_ns,
+            width=int(reader.width), height=int(reader.height), num_frames=int(reader.num_frames),
+            first_timestamp=reader.timestamp_at(0), last_timestamp=reader.timestamp_at(reader.num_frames - 1),
+        )
+
+
 def build_clip_document(
     partial_path: Path, final_path: Path, view_document: SelectionDocument, *,
     reader_factory: Callable[[Path], Any],

@@ -26,6 +26,21 @@ from flir_seq_tool.extraction import (
 START = datetime(2026, 8, 28, 9, 26, 37, 152000)
 
 
+def test_publish_gate_refuses_late_cancel():
+    handle = ExportAbortHandle()
+    event = threading.Event()
+    assert handle.begin_publish(event) is True
+    assert handle.request_cancel(event) is False
+    assert not event.is_set()
+
+
+def test_cancel_wins_before_publish():
+    handle = ExportAbortHandle()
+    event = threading.Event()
+    assert handle.request_cancel(event) is True
+    assert handle.begin_publish(event) is False
+
+
 @pytest.mark.parametrize(
     "name",
     ["", " ", ".", "..", "a/b", r"a\b", "bad:name", "bad*name", "CON", "com1.txt", "tail."],

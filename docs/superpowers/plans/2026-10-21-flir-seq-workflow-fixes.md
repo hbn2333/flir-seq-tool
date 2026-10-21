@@ -467,7 +467,7 @@ journal 更新先写同目录独占临时文件、fsync 后替换；记录“即
 
 文件：修改 `extraction.py`、`export_bundle.py`、`viewer.py`；测试 `test_extraction.py`、`test_export_bundle.py`、`test_viewer.py`。
 
-- [ ] 在现有 `ExportAbortHandle` 测试增加“取消先赢”和“发布先赢”，给出准确契约：
+- [x] 在现有 `ExportAbortHandle` 测试增加“取消先赢”和“发布先赢”，给出准确契约：
 
 ```python
 def test_publish_gate_refuses_late_cancel():
@@ -488,8 +488,8 @@ def test_cancel_wins_before_publish():
     assert handle.begin_publish(event) is False
 ```
 
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_extraction.py -k 'publish_gate or cancel_wins' -q`，确认新方法缺失。
-- [ ] 在 handle 使用已有锁增加 `_publishing`；`request_cancel` 在同一锁中判断并设置 Event，SDK abort 在锁外调用；`begin_publish` 在同一锁中先读 Event，再切 publishing。ExportJob.cancel 返回是否接受，发布后不再 set Event。现有直接 run_export 的 Event 调用保留兼容，但进入发布后不依据晚到的 Event 将发布失败错报 cancelled。
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_extraction.py -k 'publish_gate or cancel_wins' -q`，确认新方法缺失。
+- [x] 在 handle 使用已有锁增加 `_publishing`；`request_cancel` 在同一锁中判断并设置 Event，SDK abort 在锁外调用；`begin_publish` 在同一锁中先读 Event，再切 publishing。ExportJob.cancel 返回是否接受，发布后不再 set Event。现有直接 run_export 的 Event 调用保留兼容，但进入发布后不依据晚到的 Event 将发布失败错报 cancelled。
 
 ```python
 def begin_publish(self, cancel_event):
@@ -502,12 +502,12 @@ def begin_publish(self, cancel_event):
 
 ExportProgressSnapshot/ExportProgress 增加 `cancel_allowed: bool = True`；update 支持该字段。准备完成、取得门后更新为 False 和 `Finalizing paired files; please wait`。UI poll 必须显示 snapshot.message，而不只是百分比；禁用取消按钮。Close 仍只 bounded join，不在 UI 线程等完整发布，不中断已进入发布的非 daemon worker。
 
-- [ ] worker 保留现有 SDK 提取及 validator；有 document 时，在临时 SEQ 校验后生成临时 JSON（独占临时文件、flush/fsync、回读 SelectionDocument），校验 source 未变、两目标快照未变、取消未接受，再进入发布。`verify_pair` 用 reader 读取最终身份和 `SelectionStore.load_path` 校验并比较冻结 transform/display/局部范围。
+- [x] worker 保留现有 SDK 提取及 validator；有 document 时，在临时 SEQ 校验后生成临时 JSON（独占临时文件、flush/fsync、回读 SelectionDocument），校验 source 未变、两目标快照未变、取消未接受，再进入发布。`verify_pair` 用 reader 读取最终身份和 `SelectionStore.load_path` 校验并比较冻结 transform/display/局部范围。
 
 临时文件集合由 worker 持有，移交事务后由事务负责；BundlePublishError.retained_paths 中的文件不得在 worker finally 中删除。无 document 时继续旧单文件路径并保留现有测试。ExportJob 新增可注入 reader_factory 供配套测试使用，默认 ScienceFileReader，传给准备和最终验证，不绕过现有 validate_extracted_seq。
 
-- [ ] 扩展 fake SDK/reader 测试：正常配套、单帧、准备阶段取消、SDK abort 异常、JSON 准备失败、发布前外部目标变化、不可取消期点击、journal 保留、worker 返回 None UI 恢复；故障返回消息包含失败阶段与恢复材料位置。确认成功必须晚于正式 pair 验证及 marker 清除。
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_extraction.py tests/unit/test_export_bundle.py tests/unit/test_viewer.py -q`，通过后提交：`feat: integrate paired export and safe cancellation gate`。
+- [x] 扩展 fake SDK/reader 测试：正常配套、单帧、准备阶段取消、SDK abort 异常、JSON 准备失败、发布前外部目标变化、不可取消期点击、journal 保留、worker 返回 None UI 恢复；故障返回消息包含失败阶段与恢复材料位置。确认成功必须晚于正式 pair 验证及 marker 清除。
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_extraction.py tests/unit/test_export_bundle.py tests/unit/test_viewer.py -q`，通过后提交：`feat: integrate paired export and safe cancellation gate`。
 
 ## 任务 9：启动自动恢复与 CLI 优先级
 
@@ -648,8 +648,10 @@ if ($seqTestExit -ne 0) { throw "pytest failed with exit code $seqTestExit" }
 | 最小真实源、三份 raw 前后核对、有界缓存 | 10 |
 | Git 分项提交、修正文档、用户验收后发布 | 全部任务及任务 10 |
 
-执行状态：任务 1–7 已实现并验证，任务 8–10 未完成。任务 1 提交 aab11a6；Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。任务 2 目标回归 131 passed（145.73 s），无警告；用 BoundedMessage 在绘制时按 renderer 宽度缩略，完整信息独立保存，F1 输出全文；长度拟合按测量比例收敛，避免逐字重复测量。最小真实 SEQ 的 1000×800 普通/编辑模式渲染图已检查，保存于忽略目录 picture/workflow-layout-20261021；三份 raw 的大小和纳秒 mtime 均未改变。Windows 原生窗口人工验收尚未完成。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。
+执行状态：任务 1–8 已实现并验证，任务 9–10 未完成。任务 1 提交 aab11a6；Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。任务 2 目标回归 131 passed（145.73 s），无警告；用 BoundedMessage 在绘制时按 renderer 宽度缩略，完整信息独立保存，F1 输出全文；长度拟合按测量比例收敛，避免逐字重复测量。最小真实 SEQ 的 1000×800 普通/编辑模式渲染图已检查，保存于忽略目录 picture/workflow-layout-20261021；三份 raw 的大小和纳秒 mtime 均未改变。Windows 原生窗口人工验收尚未完成。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。
 
 任务 5 提交 f7aabac。任务 6 目标回归 142 passed（159.59 s），请求冻结视图、确认同时覆盖两目标快照，子配置元数据验证不读取温度矩阵；两文件发布尚待任务 7–8。
 
 任务 6 提交 da0cdfc。任务 7 目标回归 44 passed、2 skipped（3.44 s，符号链接权限同上）；覆盖 journal、保护/发布改名、回滚、清理失败，及外部目标/恢复材料改写。恢复失败保留 pending 和材料；最终验证通过后的清理失败不会回滚新输出。
+
+任务 7 提交 cd6f552。任务 8 目标回归 185 passed（142.97 s），后台配套、发布取消门、正式输出校验及保留材料已接通；临时文件清理异常转为带完整路径的失败结果。自动启动恢复和真实配套集成尚待任务 9–10。
