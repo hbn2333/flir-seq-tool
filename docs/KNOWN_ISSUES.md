@@ -1,12 +1,13 @@
 # 已知问题与人工验收记录
 
-更新日期：2026-10-21。初版基线为 `2b1a5d7`（本地标签 `v0.1.0`），已由用户推送 main。当前修复在 `codex/fix-viewer-workflow`，尚未合并或推送；不将本地提交或标签称为已创建 GitHub Release。
+更新日期：2026-10-22。初版基线为 `2b1a5d7`（本地标签 `v0.1.0`），已由用户推送 main。当前修复在 `codex/fix-viewer-workflow`，尚未合并或推送；不将本地提交或标签称为已创建 GitHub Release。
 
 ## 本轮修复状态
 
 | 编号 | 问题 | 当前证据与状态 |
 | --- | --- | --- |
 | BUG-004 | 编辑模式底部文字、旋转按钮、Fine angle/Total、裁剪标签互相遮挡。 | 共享布局、模式切换显隐、顶部标签、长信息缩略与 F1 全文已实现；100/150/200 DPI 和多窗口尺寸的 renderer 检查通过，最小真实 SEQ 的普通/编辑渲染图已检查。待 Windows 原生窗口人工验收。 |
+| BUG-005 | 本轮布局调整后拖动 Selected range 报 `Another Axes already grabs mouse input`。 | 已用 Matplotlib 鼠标事件复现：隐藏的 Fine angle 与范围滑块位置重叠且仍接收输入。两个模式现在同步切换可见性和交互启用状态；隐藏编辑器的同步操作不再启用 Apply。新增拖动、重复 Apply/Cancel 切换、有效/无效裁剪的回归测试。待 Windows 窗口重新验收。 |
 | UX-001 | Save/Load 固定同名文件，不能选择或管理多套方案。 | 原生保存/打开框已接入；取消、覆盖拒绝、外部目标变化、脏状态确认、无效配置、v1 兼容、后端失败均有自动测试。待真实对话框人工验收。 |
 | EXP-001 | 子 SEQ 只含时间范围，原文件 selection 无法绑定新子文件。 | GUI 导出同时生成同名 selection，保存冻结变换/温标并绑定子文件身份；有 pending、回滚、取消门及启动恢复。最小真实 SEQ 五帧导出、重新打开与温度比较通过。待人工走通界面闭环。 |
 
@@ -18,7 +19,9 @@
 
 - 解释器：Python 3.13.5 x64；官方 FLIR Science FileSDK 2026.1.2。
 - 完整回归命令：`python -m pytest -q -rs -p no:cacheprovider`。
-- 结果：**448 passed，2 skipped，167.34 s**。两项跳过是当前 Windows 无创建文件/目录符号链接权限（WinError 1314）；硬链接保护测试通过。
+- 2026-10-22 修复 BUG-005 后结果：**453 passed，2 skipped，207.03 s**。两项跳过是当前 Windows 无创建文件/目录符号链接权限（WinError 1314）；硬链接保护测试通过。前一轮基准为 448 passed，2 skipped，167.34 s。
+- BUG-005 的 5 项新增用例先在修复前失败，其中 3 项复现相同鼠标抓取异常；修复后均通过。重复模式切换用例也通过鼠标事件点击 Edit transform、Apply/Cancel。事件测试运行于 Agg 后端，不替代 Windows 原生窗口验收。
+- 本次沙箱内首次完整测试因 pytest 临时目录创建失败产生 215 项 setup error；获准在沙箱外重跑后得到上述通过结果，未更改测试断言来规避错误。
 - 最小真实数据目标回归：`python -m pytest tests/integration/test_small_seq_extract.py tests/integration/test_small_seq_viewer.py -q -p no:cacheprovider`，**6 passed，8.97 s**。
 - 配套验证：从最小源提取第 10–14 帧，应用 -2.3° 及有效默认裁剪、固定温标 23–45 °C、magma 色图；重开子文件恢复局部 `[0,4]`，绝对首末时间不变。比较子文件第 0/2/4 帧与源第 10/12/14 帧的变换温度，`rtol=1e-6, atol=1e-4, equal_nan=True`；原始与变换后缓存均不超过 3 帧。
 - 集成测试以 finally 检查所有 raw 的大小和纳秒 mtime；完整 pytest 进程外另比较文件列表、大小与 Windows 100 ns Ticks。三份文件均未变化；大文件只 stat，未进行完整温度读取或性能测试。
@@ -36,6 +39,7 @@
 以下不能由自动测试代勾，建议先使用最小 SEQ：
 
 - [ ] 在实际屏幕缩放与窗口大小下检查普通/编辑模式，无控件遮挡；F1 能看到完整路径和错误。
+- [ ] 拖动 Selected range 两端，再进入 Edit transform 拖动 Fine angle；分别 Apply/Cancel 返回，重复拖动范围，确认无鼠标抓取异常。
 - [ ] 0.1° 微调、拖动裁剪、输入精确框、Apply/Cancel/Reset/Maximum 和切帧正常。
 - [ ] 保存方案 A/B，再明确选择其中一个加载；取消打开、保存、覆盖或丢弃修改均保留当前状态。
 - [ ] Apply 后直接导出五帧，无须先 Save；确认两个输出文件，关闭后打开子 SEQ 自动恢复视图。

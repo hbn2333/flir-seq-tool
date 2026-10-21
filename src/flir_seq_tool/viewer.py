@@ -640,6 +640,8 @@ def build_viewer(
             updating = False
         if mode_state.editing_transform:
             slider.ax.set_visible(True)
+            range_slider.set_active(False)
+            range_slider.ax.set_visible(False)
 
     def mark_selection_dirty() -> None:
         session.selection_dirty = True
@@ -786,6 +788,16 @@ def build_viewer(
     def set_normal_controls_visible(visible: bool) -> None:
         for control_axis in normal_control_axes:
             control_axis.set_visible(visible)
+        # Normal/editor controls share screen space. Visibility alone does not
+        # stop Matplotlib widgets from grabbing mouse input in the other mode.
+        for control in (
+            start_box, end_box, confirm_button, reset_button, save_button,
+            load_button, edit_transform_button, clip_name_box, export_button,
+        ):
+            control.set_active(visible)
+        range_slider.set_active(visible and session.timeline.local_num_frames > 1)
+        # Mode changes are only allowed when no export is running.
+        cancel_button.set_active(False)
         export_text.set_visible(visible)
         progress_text.set_visible(visible)
 

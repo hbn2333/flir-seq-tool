@@ -500,6 +500,28 @@ def test_set_visible_synchronizes_axes_selector_and_text():
     plt.close(editor.figure)
 
 
+@pytest.mark.parametrize("valid_crop", [True, False])
+def test_hidden_editor_stays_inactive_after_sync_and_restores_validity(valid_crop):
+    editor = _build_editor()
+    try:
+        if not valid_crop:
+            editor.draft.set_crop(CropRect(0, 0, 9, 6))
+        controls = (
+            editor.angle_slider, editor.angle_box, *editor.crop_boxes.values(),
+            editor.left_button, editor.right_button, editor.half_turn_button,
+            editor.zero_button, editor.maximum_button, editor.reset_button,
+            editor.cancel_button, editor.apply_button,
+        )
+        editor.set_visible(False)
+        editor._sync_controls()
+        assert all(not control.active for control in controls)
+        editor.set_visible(True)
+        assert all(control.active for control in controls if control is not editor.apply_button)
+        assert editor.apply_button.active is valid_crop
+    finally:
+        plt.close(editor.figure)
+
+
 @pytest.mark.parametrize(
     "button_name",
     [

@@ -117,6 +117,15 @@ class TransformEditorUI:
     def set_visible(self, visible: bool) -> None:
         for control_axis in self.control_axes:
             control_axis.set_visible(visible)
+        # Hidden Axes still pass widget hit tests; disable their input as well.
+        for control in (
+            self.angle_slider, self.angle_box, *self.crop_boxes.values(),
+            self.left_button, self.right_button, self.half_turn_button,
+            self.zero_button, self.maximum_button, self.reset_button,
+            self.cancel_button,
+        ):
+            control.set_active(visible)
+        self.apply_button.set_active(visible and self.draft.is_valid)
         self.selector.set_active(visible)
         self.selector.set_visible(visible)
         self.status_text.set_visible(visible)
@@ -181,7 +190,9 @@ class TransformEditorUI:
                 crop.y - 0.5,
                 crop.y + crop.height - 0.5,
             )
-            self.apply_button.set_active(self.draft.is_valid)
+            self.apply_button.set_active(
+                self.apply_button.ax.get_visible() and self.draft.is_valid
+            )
             color = "limegreen" if self.draft.is_valid else "crimson"
             self.selector.set_props(edgecolor=color)
             self.status_text.set_text(self.draft.message)

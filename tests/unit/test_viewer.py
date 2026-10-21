@@ -142,6 +142,50 @@ def _send_transform_mouse(ui, name, xdata, ydata):
     ui.figure.canvas.callbacks.process(name, event)
 
 
+def _drag_control(ui, control, start, end):
+    canvas = ui.figure.canvas
+    canvas.draw()
+    for name, value in (("button_press_event", start),
+                        ("motion_notify_event", end),
+                        ("button_release_event", end)):
+        x, y = control.ax.transData.transform((value, 0.5))
+        canvas.callbacks.process(name, MouseEvent(name, canvas, x, y, button=1))
+        if name != "button_release_event":
+            assert canvas.mouse_grabber is control.ax
+    assert canvas.mouse_grabber is None
+
+
+def test_range_mouse_drag_does_not_activate_hidden_angle_slider():
+    session = ViewerSession(FakeTemperatureReader(make_frames(10)))
+    ui = build_viewer(session)
+    try:
+        _drag_control(ui, ui.range_slider, 2, 3)
+        assert session.timeline.pending_range == (3, 9)
+        assert ui.transform_editor.draft.angle_deg == 0
+    finally:
+        plt.close(ui.figure)
+
+
+@pytest.mark.parametrize("exit_button", ["apply_button", "cancel_button"])
+def test_mouse_drag_after_repeated_transform_mode_switches(exit_button):
+    session = ViewerSession(FakeTemperatureReader(make_frames(10)))
+    ui = build_viewer(session)
+    try:
+        for _ in range(2):
+            _drag_control(ui, ui.edit_transform_button, 0.5, 0.5)
+            _drag_control(ui, ui.transform_editor.angle_slider, 0, 5)
+            assert ui.transform_editor.draft.angle_deg == pytest.approx(5, abs=0.1)
+            assert session.timeline.pending_range == (0, 9)
+            _drag_control(ui, ui.slider, 1, 2)
+            assert session.timeline.current_local_frame == 2
+            _drag_control(ui, getattr(ui.transform_editor, exit_button), 0.5, 0.5)
+            _drag_control(ui, ui.range_slider, 2, 3)
+            assert session.timeline.pending_range == (3, 9)
+            ui.range_slider.set_val((0, 9))
+    finally:
+        plt.close(ui.figure)
+
+
 @pytest.mark.parametrize("draw_first", [False, True])
 @pytest.mark.parametrize("click_x", [5, 6])
 def test_transform_single_click_keeps_crop_and_visible_selector(draw_first, click_x):
