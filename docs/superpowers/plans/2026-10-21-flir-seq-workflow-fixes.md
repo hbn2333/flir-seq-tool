@@ -404,7 +404,7 @@ document = build_selection_document(
 
 文件：修改 `export_bundle.py`、`tests/unit/test_export_bundle.py`；必要的共享路径保护只修改 `file_safety.py`。
 
-- [ ] 定义并测试 `publish_bundle(*, source_path, raw_root, seq_temp, selection_temp, seq_target, expected_seq, expected_selection, verify_pair) -> BundlePublishResult`；返回字段 `warnings: tuple[str, ...]`。失败抛出 `BundlePublishError`，包含 `stage`、`retained_paths: tuple[Path, ...]`，不得通过普通 finally 删除 retained_paths。
+- [x] 定义并测试 `publish_bundle(*, source_path, raw_root, seq_temp, selection_temp, seq_target, expected_seq, expected_selection, verify_pair) -> BundlePublishResult`；返回字段 `warnings: tuple[str, ...]`。失败抛出 `BundlePublishError`，包含 `stage`、`retained_paths: tuple[Path, ...]`，不得通过普通 finally 删除 retained_paths。
 
 先加入具体回滚回归，全部输入是 tmp_path 中的普通字节文件，不使用真实 SDK：
 
@@ -444,8 +444,8 @@ def test_failed_pair_verification_restores_old_outputs(tmp_path):
     assert not pending_path(target).exists()
 ```
 
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_export_bundle.py -k failed_pair_verification -q`，确认发布能力尚未实现。
-- [ ] 分小步实现以下有限状态机，每个状态先加故障注入测试再实现，不建立通用事务框架：
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_export_bundle.py -k failed_pair_verification -q`，确认发布能力尚未实现。
+- [x] 分小步实现以下有限状态机，每个状态先加故障注入测试再实现，不建立通用事务框架：
 
 | 阶段 | 操作与校验 | 失败处理 |
 | --- | --- | --- |
@@ -459,9 +459,9 @@ def test_failed_pair_verification_restores_old_outputs(tmp_path):
 
 journal 更新先写同目录独占临时文件、fsync 后替换；记录“即将操作”与“已完成”，保证中途崩溃至少留下待处理标记。不在启动时执行 journal 内记录的任意路径。事务只承诺已检查的外部改动不会被主动覆盖，不宣称跨进程两文件原子性或断电自动恢复；每次改名附近都重新核验，保留 Windows 的文件身份差异测试。
 
-- [ ] 按表逐个注入失败：marker 创建/更新；第一/第二旧文件保护；第一/第二新文件发布；最终验证；恢复；清理。再参数化两个旧目标存在性的 4 种组合。覆盖原目标出现/变化、恢复文件变化、已发布新文件被外部改写、pending 已存在。每个情景明确断言最终 bytes、marker 存在性及恢复材料，而不是只断言抛异常。
-- [ ] 增加正常成功测试，verify_pair 内断言 marker 此时仍存在；返回后两文件为新数据、marker 消失、无本事务遗留。验证成功后仅恢复材料删除失败，应保留新输出且返回警告，不错误回滚。
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_export_bundle.py tests/unit/test_file_safety.py -q`，通过后提交：`feat: publish SEQ sidecars with recovery markers`。
+- [x] 按表逐个注入失败：marker 创建/更新；第一/第二旧文件保护；第一/第二新文件发布；最终验证；恢复；清理。再参数化两个旧目标存在性的 4 种组合。覆盖原目标出现/变化、恢复文件变化、已发布新文件被外部改写、pending 已存在。每个情景明确断言最终 bytes、marker 存在性及恢复材料，而不是只断言抛异常。
+- [x] 增加正常成功测试，verify_pair 内断言 marker 此时仍存在；返回后两文件为新数据、marker 消失、无本事务遗留。验证成功后仅恢复材料删除失败，应保留新输出且返回警告，不错误回滚。
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_export_bundle.py tests/unit/test_file_safety.py -q`，通过后提交：`feat: publish SEQ sidecars with recovery markers`。
 
 ## 任务 8：接入 worker、发布阶段取消与 UI 反馈
 
@@ -648,6 +648,8 @@ if ($seqTestExit -ne 0) { throw "pytest failed with exit code $seqTestExit" }
 | 最小真实源、三份 raw 前后核对、有界缓存 | 10 |
 | Git 分项提交、修正文档、用户验收后发布 | 全部任务及任务 10 |
 
-执行状态：任务 1–6 已实现并验证，任务 7–10 未完成。任务 1 提交 aab11a6；Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。任务 2 目标回归 131 passed（145.73 s），无警告；用 BoundedMessage 在绘制时按 renderer 宽度缩略，完整信息独立保存，F1 输出全文；长度拟合按测量比例收敛，避免逐字重复测量。最小真实 SEQ 的 1000×800 普通/编辑模式渲染图已检查，保存于忽略目录 picture/workflow-layout-20261021；三份 raw 的大小和纳秒 mtime 均未改变。Windows 原生窗口人工验收尚未完成。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。
+执行状态：任务 1–7 已实现并验证，任务 8–10 未完成。任务 1 提交 aab11a6；Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。任务 2 目标回归 131 passed（145.73 s），无警告；用 BoundedMessage 在绘制时按 renderer 宽度缩略，完整信息独立保存，F1 输出全文；长度拟合按测量比例收敛，避免逐字重复测量。最小真实 SEQ 的 1000×800 普通/编辑模式渲染图已检查，保存于忽略目录 picture/workflow-layout-20261021；三份 raw 的大小和纳秒 mtime 均未改变。Windows 原生窗口人工验收尚未完成。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。
 
 任务 5 提交 f7aabac。任务 6 目标回归 142 passed（159.59 s），请求冻结视图、确认同时覆盖两目标快照，子配置元数据验证不读取温度矩阵；两文件发布尚待任务 7–8。
+
+任务 6 提交 da0cdfc。任务 7 目标回归 44 passed、2 skipped（3.44 s，符号链接权限同上）；覆盖 journal、保护/发布改名、回滚、清理失败，及外部目标/恢复材料改写。恢复失败保留 pending 和材料；最终验证通过后的清理失败不会回滚新输出。

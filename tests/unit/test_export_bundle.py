@@ -124,3 +124,257 @@ def test_request_rejects_inconsistent_view_and_pending(tmp_path):
     pending_path(request.target_path).write_text("untrusted pending")
     with pytest.raises(RuntimeError, match="pending"):
         confirm(request)
+
+
+def bundle_inputs(tmp_path, old_seq=True, old_config=True):
+    from flir_seq_tool.export_bundle import sidecar_path
+    from flir_seq_tool.file_safety import TargetSnapshot
+    source = tmp_path / "source.seq"
+    source.write_bytes(b"source")
+    target = tmp_path / "clip.seq"
+    config = sidecar_path(target)
+    if old_seq:
+        target.write_bytes(b"old-seq")
+    if old_config:
+        config.write_bytes(b"old-config")
+    seq_temp, config_temp = tmp_path / "unique.partial.seq", tmp_path / "unique.partial.json"
+    seq_temp.write_bytes(b"new-seq")
+    config_temp.write_bytes(b"new-config")
+    return dict(source_path=source, raw_root=tmp_path / "raw", seq_temp=seq_temp,
+                selection_temp=config_temp, seq_target=target,
+                expected_seq=TargetSnapshot.capture(target), expected_selection=TargetSnapshot.capture(config))
+
+
+@pytest.mark.parametrize("old_seq,old_config", [(False, False), (True, False), (False, True), (True, True)])
+@pytest.mark.parametrize("reject", [False, True])
+def test_pair_publication_and_verification_rollback(tmp_path, old_seq, old_config, reject):
+    from flir_seq_tool.export_bundle import BundlePublishError, pending_path, publish_bundle, sidecar_path
+    kwargs = bundle_inputs(tmp_path, old_seq, old_config)
+    target = kwargs["seq_target"]
+    config = sidecar_path(target)
+    def verify(seq, selection):
+        assert pending_path(target).is_file()
+        assert seq.read_bytes() == b"new-seq"
+        assert selection.read_bytes() == b"new-config"
+        if reject:
+            raise ValueError("injected verification failure")
+    if reject:
+        with pytest.raises(BundlePublishError, match="verify"):
+            publish_bundle(**kwargs, verify_pair=verify)
+        assert target.read_bytes() == b"old-seq" if old_seq else not target.exists()
+        assert config.read_bytes() == b"old-config" if old_config else not config.exists()
+    else:
+        assert publish_bundle(**kwargs, verify_pair=verify).warnings == ()
+        assert target.read_bytes() == b"new-seq"
+        assert config.read_bytes() == b"new-config"
+    assert not pending_path(target).exists()
+    assert not list(tmp_path.glob("*.recovery"))
+    assert not list(tmp_path.glob("*.partial.*"))
+
+
+@pytest.mark.parametrize("stage", ["claim", "protect-0", "protect-1", "publish-0", "publish-1", "verify"])
+def test_journal_failure_restores_old_pair(tmp_path, monkeypatch, stage):
+    import flir_seq_tool.export_bundle as bundle
+    kwargs = bundle_inputs(tmp_path)
+    original = bundle._Journal.record
+    failed = False
+    def fail_once(self, state, entries):
+        nonlocal failed
+        if state == stage and not failed:
+            failed = True
+            raise OSError("journal failure")
+        return original(self, state, entries)
+    monkeypatch.setattr(bundle._Journal, "record", fail_once)
+    with pytest.raises(bundle.BundlePublishError):
+        bundle.publish_bundle(**kwargs, verify_pair=lambda *_: None)
+    assert failed
+    assert kwargs["seq_target"].read_bytes() == b"old-seq"
+    assert bundle.sidecar_path(kwargs["seq_target"]).read_bytes() == b"old-config"
+    assert not bundle.pending_path(kwargs["seq_target"]).exists()
+
+
+@pytest.mark.parametrize("operation", ["protect-seq", "protect-json", "publish-seq", "publish-json"])
+def test_rename_failure_restores_old_pair(tmp_path, monkeypatch, operation):
+    import flir_seq_tool.export_bundle as bundle
+    kwargs = bundle_inputs(tmp_path)
+    target = kwargs["seq_target"]
+    config = bundle.sidecar_path(target)
+    original = bundle.os.replace
+    failed = False
+    def fail_once(src, dst):
+        nonlocal failed
+        src, dst = Path(src), Path(dst)
+        hit = {"protect-seq": src == target and dst.suffix == ".recovery",
+               "protect-json": src == config and dst.suffix == ".recovery",
+               "publish-seq": src == kwargs["seq_temp"] and dst == target,
+               "publish-json": src == kwargs["selection_temp"] and dst == config}[operation]
+        if hit and not failed:
+            failed = True
+            raise OSError(operation)
+        return original(src, dst)
+    monkeypatch.setattr(bundle.os, "replace", fail_once)
+    with pytest.raises(bundle.BundlePublishError):
+        bundle.publish_bundle(**kwargs, verify_pair=lambda *_: None)
+    assert failed
+    assert target.read_bytes() == b"old-seq"
+    assert config.read_bytes() == b"old-config"
+    assert not bundle.pending_path(target).exists()
+
+
+@pytest.mark.parametrize("changed", ["published", "recovery"])
+def test_external_change_preserves_materials_and_pending(tmp_path, changed):
+    import flir_seq_tool.export_bundle as bundle
+    kwargs = bundle_inputs(tmp_path)
+    target = kwargs["seq_target"]
+    changed_path = None
+    def reject(seq, config):
+        nonlocal changed_path
+        changed_path = seq if changed == "published" else next(tmp_path.glob("clip.seq.*.recovery"))
+        changed_path.write_bytes(b"external bytes")
+        raise ValueError("injected verify failure")
+    with pytest.raises(bundle.BundlePublishError) as caught:
+        bundle.publish_bundle(**kwargs, verify_pair=reject)
+    assert changed_path.read_bytes() == b"external bytes"
+    assert bundle.pending_path(target).exists()
+    assert bundle.pending_path(target) in caught.value.retained_paths
+    assert str(changed_path) in str(caught.value)
+
+
+def test_existing_pending_is_never_interpreted_or_overwritten(tmp_path):
+    import flir_seq_tool.export_bundle as bundle
+    kwargs = bundle_inputs(tmp_path)
+    marker = bundle.pending_path(kwargs["seq_target"])
+    marker.write_bytes(b"untrusted journal")
+    with pytest.raises(bundle.BundlePublishError):
+        bundle.publish_bundle(**kwargs, verify_pair=lambda *_: None)
+    assert marker.read_bytes() == b"untrusted journal"
+    assert kwargs["seq_target"].read_bytes() == b"old-seq"
+
+
+@pytest.mark.parametrize("which", ["recovery", "marker"])
+def test_cleanup_failure_never_reverts_verified_pair(tmp_path, monkeypatch, which):
+    import flir_seq_tool.export_bundle as bundle
+    kwargs = bundle_inputs(tmp_path)
+    target = kwargs["seq_target"]
+    original = Path.unlink
+    def fail_cleanup(self, *args, **kw):
+        if (which == "recovery" and self.suffix == ".recovery") or (which == "marker" and self == bundle.pending_path(target)):
+            raise OSError("cleanup failure")
+        return original(self, *args, **kw)
+    monkeypatch.setattr(Path, "unlink", fail_cleanup)
+    if which == "marker":
+        with pytest.raises(bundle.BundlePublishError, match="finish"):
+            bundle.publish_bundle(**kwargs, verify_pair=lambda *_: None)
+        assert bundle.pending_path(target).exists()
+    else:
+        assert bundle.publish_bundle(**kwargs, verify_pair=lambda *_: None).warnings
+        assert not bundle.pending_path(target).exists()
+    assert target.read_bytes() == b"new-seq"
+    assert bundle.sidecar_path(target).read_bytes() == b"new-config"
+
+
+@pytest.mark.parametrize("bad", ["source", "outside", "alias"])
+def test_pair_rejects_unsafe_temporary_paths_before_marker(tmp_path, bad):
+    import flir_seq_tool.export_bundle as bundle
+    kwargs = bundle_inputs(tmp_path)
+    if bad == "source":
+        kwargs["seq_temp"] = kwargs["source_path"]
+    elif bad == "outside":
+        outside = tmp_path / "other"
+        outside.mkdir()
+        kwargs["seq_temp"] = outside / "temp.seq"
+        kwargs["seq_temp"].write_bytes(b"outside")
+    else:
+        kwargs["seq_temp"] = kwargs["selection_temp"]
+    with pytest.raises(bundle.BundlePublishError):
+        bundle.publish_bundle(**kwargs, verify_pair=lambda *_: None)
+    assert kwargs["source_path"].read_bytes() == b"source"
+    assert kwargs["seq_target"].read_bytes() == b"old-seq"
+    assert not bundle.pending_path(kwargs["seq_target"]).exists()
+
+
+def test_external_target_appearing_after_protection_is_not_overwritten(tmp_path, monkeypatch):
+    import flir_seq_tool.export_bundle as bundle
+    kwargs = bundle_inputs(tmp_path)
+    original = bundle._Journal.record
+    def insert_external(self, state, entries):
+        original(self, state, entries)
+        if state == "publish-0":
+            kwargs["seq_target"].write_bytes(b"external target")
+    monkeypatch.setattr(bundle._Journal, "record", insert_external)
+    with pytest.raises(bundle.BundlePublishError) as caught:
+        bundle.publish_bundle(**kwargs, verify_pair=lambda *_: None)
+    assert kwargs["seq_target"].read_bytes() == b"external target"
+    assert bundle.sidecar_path(kwargs["seq_target"]).read_bytes() == b"old-config"
+    assert bundle.pending_path(kwargs["seq_target"]).exists()
+    assert any(p.read_bytes() == b"old-seq" for p in caught.value.retained_paths if p.suffix == ".recovery")
+
+
+def test_rollback_rename_failure_retains_old_and_new_materials(tmp_path, monkeypatch):
+    import flir_seq_tool.export_bundle as bundle
+    kwargs = bundle_inputs(tmp_path)
+    original = bundle.os.replace
+    def fail_restore(src, dst):
+        if Path(src).suffix == ".recovery":
+            raise OSError("restore denied")
+        return original(src, dst)
+    monkeypatch.setattr(bundle.os, "replace", fail_restore)
+    def reject(*_):
+        raise ValueError("verify rejected")
+    with pytest.raises(bundle.BundlePublishError) as caught:
+        bundle.publish_bundle(**kwargs, verify_pair=reject)
+    assert "restore denied" in str(caught.value)
+    assert bundle.pending_path(kwargs["seq_target"]).exists()
+    assert not kwargs["seq_target"].exists()
+    assert {p.read_bytes() for p in caught.value.retained_paths if p.suffix == ".recovery"} == {b"old-seq", b"old-config"}
+    assert kwargs["seq_temp"].read_bytes() == b"new-seq"
+    assert kwargs["selection_temp"].read_bytes() == b"new-config"
+
+
+def test_stat_failure_after_protection_still_restores_old_pair(tmp_path, monkeypatch):
+    import flir_seq_tool.export_bundle as bundle
+    kwargs = bundle_inputs(tmp_path)
+    original = bundle.TargetSnapshot.capture
+    failed = False
+    def fail_once(path):
+        nonlocal failed
+        if Path(path).suffix == ".recovery" and Path(path).exists() and not failed:
+            failed = True
+            raise OSError("stat unavailable")
+        return original(path)
+    monkeypatch.setattr(bundle.TargetSnapshot, "capture", fail_once)
+    with pytest.raises(bundle.BundlePublishError):
+        bundle.publish_bundle(**kwargs, verify_pair=lambda *_: None)
+    assert failed
+    assert kwargs["seq_target"].read_bytes() == b"old-seq"
+    assert bundle.sidecar_path(kwargs["seq_target"]).read_bytes() == b"old-config"
+    assert not bundle.pending_path(kwargs["seq_target"]).exists()
+
+
+def test_marker_creation_failure_changes_no_formal_outputs(tmp_path, monkeypatch):
+    import flir_seq_tool.export_bundle as bundle
+    kwargs = bundle_inputs(tmp_path)
+    original = Path.open
+    marker = bundle.pending_path(kwargs["seq_target"])
+    def fail_create(self, mode="r", *args, **kw):
+        if self == marker and mode == "x":
+            raise PermissionError("marker denied")
+        return original(self, mode, *args, **kw)
+    monkeypatch.setattr(Path, "open", fail_create)
+    with pytest.raises(bundle.BundlePublishError, match="claim"):
+        bundle.publish_bundle(**kwargs, verify_pair=lambda *_: None)
+    assert not marker.exists()
+    assert kwargs["seq_target"].read_bytes() == b"old-seq"
+    assert bundle.sidecar_path(kwargs["seq_target"]).read_bytes() == b"old-config"
+
+
+def test_changed_target_snapshot_rejected_before_claim(tmp_path):
+    import flir_seq_tool.export_bundle as bundle
+    kwargs = bundle_inputs(tmp_path)
+    config = bundle.sidecar_path(kwargs["seq_target"])
+    config.write_bytes(b"changed config")
+    with pytest.raises(bundle.BundlePublishError, match="validate"):
+        bundle.publish_bundle(**kwargs, verify_pair=lambda *_: None)
+    assert config.read_bytes() == b"changed config"
+    assert kwargs["seq_target"].read_bytes() == b"old-seq"
+    assert not bundle.pending_path(kwargs["seq_target"]).exists()
