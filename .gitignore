@@ -1,0 +1,21 @@
+.worktrees/
+
+# Local experimental data, proprietary SDK and screenshots are not source code.
+raw/
+SDK/
+picture/
+*.seq
+
+# Python caches and local build/install outputs.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+build/
+dist/
+
+# Local runtime outputs; source SEQ files remain external data, not code.
+clips/
+selections/
+*.partial.seq
