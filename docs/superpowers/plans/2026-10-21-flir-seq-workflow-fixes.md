@@ -255,7 +255,7 @@ def load_path(self, target, expected_source=None):
 
 文件：新增 `src/flir_seq_tool/selection_dialogs.py`、`tests/unit/test_selection_dialogs.py`。
 
-- [ ] 先测试保存后缀与取消值，再测试假的 tkinter 调用及 finally 释放 root。对外对象 `SelectionDialogs` 提供 `choose_save(initial_dir, suggested_name)`、`choose_load(initial_dir)`、`confirm(message)`、`show_details(message)`；前两者返回 `Path | None`，confirm 返回 bool，详情无状态修改。
+- [x] 先测试保存后缀与取消值，再测试假的 tkinter 调用及 finally 释放 root。对外对象 `SelectionDialogs` 提供 `choose_save(initial_dir, suggested_name)`、`choose_load(initial_dir)`、`confirm(message)`、`show_details(message)`；前两者返回 `Path | None`，confirm 返回 bool，详情无状态修改。
 
 ```python
 import pytest
@@ -275,7 +275,7 @@ def test_reject_seq_suffix():
         normalize_selection_path("experiment.seq")
 ```
 
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_selection_dialogs.py -q`，确认新能力缺失后实现：
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_selection_dialogs.py -q`，确认新能力缺失后实现：
 
 ```python
 def normalize_selection_path(value):
@@ -293,8 +293,8 @@ tkinter 采用惰性导入；优先使用 figure.manager.window 的 Tk 父窗口
 
 保存调用 `filedialog.asksaveasfilename(parent=parent, initialdir=str(initial_dir), initialfile=suggested_name, filetypes=[("Selection JSON", "*.selection.json")], confirmoverwrite=False)`。后缀规范化后由任务 5 捕获快照、执行一次明确覆盖确认，避免原生框确认的路径与补后缀后的目标不一致。打开用 `askopenfilename`；确认用 `messagebox.askyesno`；详情用 `messagebox.showinfo`。不在选择目录前主动 mkdir，取消必须无文件写入。
 
-- [ ] 测试真实窗口函数均被替身替代：取消返回 None、后端失败不写文件、已有父窗口不销毁、临时 root 在成功/取消/异常均销毁、非主线程拒绝。测试不启动窗口、不依赖用户点击。
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_selection_dialogs.py -q`，通过后提交：`feat: add native selection dialog adapter`。
+- [x] 测试真实窗口函数均被替身替代：取消返回 None、后端失败不写文件、已有父窗口不销毁、临时 root 在成功/取消/异常均销毁、非主线程拒绝。测试不启动窗口、不依赖用户点击。
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_selection_dialogs.py -q`，通过后提交：`feat: add native selection dialog adapter`。
 
 ## 任务 5：连接 Save / Load 与 session 状态
 
