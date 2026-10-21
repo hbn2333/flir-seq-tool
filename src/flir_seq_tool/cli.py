@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     view_parser = subparsers.add_parser("view", help="interactively view a SEQ file")
     view_parser.add_argument("input", type=Path)
-    view_parser.add_argument("--frame", type=int, default=0, help="initial frame index")
+    view_parser.add_argument("--frame", type=int, default=None, help="initial source frame index (default: restored range start)")
     view_parser.add_argument("--vmin", type=float, help="fixed color scale minimum (Celsius)")
     view_parser.add_argument("--vmax", type=float, help="fixed color scale maximum (Celsius)")
     return parser

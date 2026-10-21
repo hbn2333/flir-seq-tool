@@ -781,6 +781,7 @@ def test_confirming_single_frame_hides_sliders_until_full_reset():
 
 def test_launch_viewer_keeps_ui_alive_while_event_loop_runs(monkeypatch, tmp_path):
     class FakeReader:
+        path = tmp_path / "sample.seq"
         num_frames = 1
         width = 3
         height = 2
@@ -812,6 +813,133 @@ def test_launch_viewer_keeps_ui_alive_while_event_loop_runs(monkeypatch, tmp_pat
     monkeypatch.setattr(viewer.plt, "show", fake_show)
 
     viewer.launch_viewer(tmp_path / "sample.seq")
+
+
+def saved_startup_view(tmp_path):
+    reader = FileBackedFakeReader(make_frames(count=5), tmp_path / "sample.seq")
+    session = ViewerSession(reader, vmin=20, vmax=40, selection_store=SelectionStore(tmp_path))
+    session.timeline.set_pending(1, 3)
+    session.apply_transform(cropped_transform())
+    config = session.save_selection()
+    return reader, config, session.selection_document()
+
+
+def test_startup_without_same_directory_sidecar_does_not_scan_other_configs(tmp_path):
+    reader = FileBackedFakeReader(make_frames(count=5), tmp_path / "sample.seq")
+    old = ViewerSession(reader, vmin=20, vmax=40, selection_store=SelectionStore(tmp_path / "elsewhere"))
+    old.save_selection()
+    session = ViewerSession(reader)
+    assert session.restore_startup() == (0, ())
+    assert session.color_limits is None
+    assert reader.requested_frames == []
+
+
+@pytest.mark.parametrize("initial_frame,local,warn", [(None, 0, False), (2, 1, False), (0, 0, True), (4, 0, True)])
+def test_startup_restores_view_and_maps_explicit_source_frame(tmp_path, initial_frame, local, warn):
+    reader, config, document = saved_startup_view(tmp_path)
+    session = ViewerSession(reader)
+    frame, notices = session.restore_startup(initial_frame=initial_frame)
+    assert frame == local
+    assert session.applied_transform == document.transform
+    assert (session.timeline.source_start, session.timeline.source_end) == (1, 3)
+    assert session.selection_path == config
+    assert str(config) in "\n".join(notices)
+    assert ("outside" in "\n".join(notices)) == warn
+    assert not session.has_unsaved_changes()
+    assert reader.requested_frames == []
+
+
+@pytest.mark.parametrize("limits,dirty", [((None, None), False), ((20, 40), False), ((21, 41), True)])
+def test_startup_cli_temperature_limits_override_without_false_dirty(tmp_path, limits, dirty):
+    reader, _, _ = saved_startup_view(tmp_path)
+    session = ViewerSession(reader)
+    session.restore_startup(vmin=limits[0], vmax=limits[1])
+    assert session.color_limits == ColorLimits(*(limits if limits[0] is not None else (20, 40)))
+    assert session.has_unsaved_changes() is dirty
+
+
+@pytest.mark.parametrize("options,error", [({"initial_frame": 5}, IndexError), ({"initial_frame": -1}, IndexError),
+    ({"vmin": 20}, ValueError), ({"vmin": float("nan"), "vmax": 40}, ValueError),
+    ({"vmin": 20, "vmax": float("inf")}, ValueError), ({"vmin": 40, "vmax": 20}, ValueError)])
+def test_startup_rejects_invalid_cli_before_loading_config(tmp_path, monkeypatch, options, error):
+    reader, _, _ = saved_startup_view(tmp_path)
+    session = ViewerSession(reader)
+    before = session.state_signature()
+    def never_load(*_):
+        raise AssertionError("invalid CLI must be rejected first")
+    monkeypatch.setattr(session.selection_store, "load_path", never_load)
+    with pytest.raises(error):
+        session.restore_startup(**options)
+    assert session.state_signature() == before
+
+
+@pytest.mark.parametrize("invalid", ["json", "identity", "colormap", "transform"])
+def test_startup_bad_sidecar_warns_and_keeps_original_view(tmp_path, invalid):
+    reader, config, document = saved_startup_view(tmp_path)
+    payload = document.to_dict()
+    if invalid == "identity":
+        payload["source"]["size_bytes"] += 1
+    elif invalid == "colormap":
+        payload["display"]["colormap"] = "missing-colormap"
+    elif invalid == "transform":
+        payload["transform"]["crop"]["width"] = 999
+    config.write_text("{" if invalid == "json" else json.dumps(payload), encoding="utf-8")
+    session = ViewerSession(reader)
+    before = session.state_signature()
+    local, notices = session.restore_startup()
+    assert local == 0 and notices
+    assert str(config) in "\n".join(notices)
+    assert session.state_signature() == before
+    assert session.selection_path is None
+
+
+@pytest.mark.parametrize("content", ["", "untrusted paths"])
+def test_startup_pending_blocks_auto_and_manual_loading(tmp_path, monkeypatch, content):
+    reader, config, document = saved_startup_view(tmp_path)
+    marker = reader.path.with_suffix(".export-pending.json")
+    marker.write_text(content)
+    session = ViewerSession(reader)
+    before = session.state_signature()
+    def never_load(*_):
+        raise AssertionError("pending must block before reading config")
+    monkeypatch.setattr(session.selection_store, "load_path", never_load)
+    local, notices = session.restore_startup()
+    assert local == 0 and "pending" in "\n".join(notices)
+    with pytest.raises(RuntimeError, match="pending"):
+        session.load_selection(config)
+    with pytest.raises(RuntimeError, match="pending"):
+        session.apply_selection_document(document, path=config)
+    assert session.state_signature() == before
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_startup_launch_restores_before_first_draw_and_does_not_reload(tmp_path, monkeypatch, version):
+    from contextlib import nullcontext
+    reader, config, document = saved_startup_view(tmp_path)
+    if version == 1:
+        payload = document.to_dict()
+        payload["schema_version"] = 1
+        del payload["transform"]
+        config.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(viewer, "ScienceFileReader", lambda _: nullcontext(reader))
+    original_build = viewer.build_viewer
+    def build(session, initial_frame):
+        assert reader.requested_frames == []
+        assert session.selection_path == config
+        ui = original_build(session, initial_frame=initial_frame)
+        assert reader.requested_frames == [1]
+        expected = FrameTransform.identity(3, 2) if version == 1 else document.transform
+        assert session.applied_transform == expected
+        assert ui.image.get_clim() == (20, 40)
+        config.write_text("now invalid", encoding="utf-8")
+        ui.slider.set_val(1)
+        ui.reset_button._observers.process("clicked", None)
+        assert session.applied_transform == expected
+        plt.close(ui.figure)
+        return ui
+    monkeypatch.setattr(viewer, "build_viewer", build)
+    monkeypatch.setattr(viewer.plt, "show", lambda: None)
+    viewer.launch_viewer(reader.path)
 
 
 def test_session_saves_current_candidate_as_source_range(tmp_path):

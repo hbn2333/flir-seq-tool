@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Callable
 
@@ -36,6 +37,7 @@ from .selection import (
 )
 from .selection_dialogs import SelectionDialogs
 from .file_safety import TargetSnapshot
+from .export_bundle import sidecar_path, pending_path
 from .timeline import TimelineState
 from .transform import FrameTransform
 from .transform_editor import TransformDraft, TransformEditorUI, build_transform_editor
@@ -43,6 +45,18 @@ from .viewer_layout import BoundedMessage, NORMAL_RECTS
 
 
 WORKSPACE_ROOT = Path(r"D:\carbonfoam\infrared")
+
+
+def _explicit_color_limits(vmin: float | None, vmax: float | None) -> ColorLimits | None:
+    if (vmin is None) != (vmax is None):
+        raise ValueError("vmin and vmax must be provided together")
+    if vmin is None:
+        return None
+    if not math.isfinite(vmin) or not math.isfinite(vmax):
+        raise ValueError("vmin and vmax must be finite")
+    if vmin >= vmax:
+        raise ValueError("vmin must be less than vmax")
+    return ColorLimits(vmin=float(vmin), vmax=float(vmax))
 
 
 class ViewerSession:
@@ -55,10 +69,7 @@ class ViewerSession:
         colormap: str = "inferno",
         selection_store: SelectionStore | None = None,
     ) -> None:
-        if (vmin is None) != (vmax is None):
-            raise ValueError("vmin and vmax must be provided together")
-        if vmin is not None and vmax is not None and vmin >= vmax:
-            raise ValueError("vmin must be less than vmax")
+        explicit_limits = _explicit_color_limits(vmin, vmax)
         if reader.num_frames < 1:
             raise ValueError("SEQ contains no frames")
 
@@ -85,11 +96,42 @@ class ViewerSession:
         self.timeline = TimelineState(reader.num_frames)
         self._work_time_key: tuple[int, int] | None = None
         self._work_time_value: tuple[datetime, datetime] | None = None
-        self.color_limits = (
-            None
-            if vmin is None or vmax is None
-            else ColorLimits(vmin=float(vmin), vmax=float(vmax))
-        )
+        self.color_limits = explicit_limits
+
+    def _check_pending(self) -> None:
+        marker = pending_path(Path(self.reader.path))
+        if marker.exists() or marker.is_symlink():
+            raise RuntimeError(f"unresolved export pending marker; view configuration blocked: {marker}")
+
+    def restore_startup(
+        self, *, initial_frame: int | None = None,
+        vmin: float | None = None, vmax: float | None = None,
+    ) -> tuple[int, tuple[str, ...]]:
+        """Restore only the source's sibling sidecar, before the first frame read."""
+        limits = _explicit_color_limits(vmin, vmax)
+        if initial_frame is not None and not 0 <= initial_frame < self.reader.num_frames:
+            raise IndexError(f"frame index out of range: {initial_frame}")
+        config = sidecar_path(Path(self.reader.path))
+        notices: list[str] = []
+        try:
+            self._check_pending()
+            if config.exists():
+                self.load_selection(config)
+                notices.append(f"Restored view configuration: {config}")
+        except (OSError, ValueError, RuntimeError) as exc:
+            notices.append(f"View configuration not restored: {config}\n{exc}")
+        if limits is not None:
+            if self.selection_path is not None and limits != self.color_limits:
+                self.selection_dirty = True
+            self.color_limits = limits
+        local_frame = 0
+        if initial_frame is not None:
+            try:
+                local_frame = self.timeline.local_frame_at(initial_frame)
+            except IndexError:
+                notices.append(f"Requested source frame {initial_frame} is outside restored range; showing its first frame.")
+        self.timeline.set_current(local_frame)
+        return local_frame, tuple(notices)
 
     def raw_frame_at(self, frame_index: int) -> TemperatureFrame:
         if not 0 <= frame_index < self.reader.num_frames:
@@ -229,12 +271,14 @@ class ViewerSession:
         return target
 
     def load_selection(self, target: Path | None = None) -> SelectionDocument:
+        self._check_pending()
         target = self.selection_store.path_for(Path(self.reader.path)) if target is None else Path(target)
         document = self.selection_store.load_path(target, self.source_identity())
         self.apply_selection_document(document, path=target)
         return document
 
     def _prepare_selection(self, document: SelectionDocument):
+        self._check_pending()
         validate_source_identity(self.source_identity(), document.source)
         if document.display.colormap not in plt.colormaps():
             raise ValueError(f"unknown colormap: {document.display.colormap}")
@@ -362,13 +406,19 @@ def transform_status(transform: FrameTransform, dirty: bool) -> str:
 
 def launch_viewer(
     path: Path,
-    initial_frame: int = 0,
+    initial_frame: int | None = None,
     vmin: float | None = None,
     vmax: float | None = None,
 ) -> None:
     with ScienceFileReader(path) as reader:
-        session = ViewerSession(reader, vmin=vmin, vmax=vmax)
-        ui = build_viewer(session, initial_frame=initial_frame)
+        session = ViewerSession(reader)
+        local_frame, notices = session.restore_startup(initial_frame=initial_frame, vmin=vmin, vmax=vmax)
+        ui = build_viewer(session, initial_frame=local_frame)
+        if notices:
+            message = "\n".join(notices)
+            ui.message_details["startup"] = message
+            ui.error_text.set_text(message)
+            print(message)
         plt.show()
 
 

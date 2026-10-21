@@ -6,6 +6,12 @@ from flir_seq_tool import cli
 from flir_seq_tool.models import SeqInspection, TimestampSummary
 
 
+def test_cli_distinguishes_omitted_frame_from_explicit_zero():
+    parser = cli.build_parser()
+    assert parser.parse_args(["view", "clip.seq"]).frame is None
+    assert parser.parse_args(["view", "clip.seq", "--frame", "0"]).frame == 0
+
+
 def sample_inspection(path: Path) -> SeqInspection:
     timestamp = datetime(2026, 8, 28, 9, 0, 0)
     return SeqInspection(

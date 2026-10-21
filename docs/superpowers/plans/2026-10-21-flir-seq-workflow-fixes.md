@@ -513,7 +513,7 @@ ExportProgressSnapshot/ExportProgress 增加 `cancel_allowed: bool = True`；upd
 
 文件：修改 `viewer.py` 的 launch_viewer/ViewerSession、`cli.py`；测试 `test_viewer.py`、`test_cli.py`。
 
-- [ ] 先在 `test_cli.py` 加入显式零与未提供的区别：
+- [x] 先在 `test_cli.py` 加入显式零与未提供的区别：
 
 ```python
 def test_cli_distinguishes_omitted_frame_from_explicit_zero():
@@ -524,8 +524,8 @@ def test_cli_distinguishes_omitted_frame_from_explicit_zero():
 
 在 `test_viewer.py` 建立 file-backed session 并把配置写到 reader.path.with_suffix('.selection.json')。新增 `ViewerSession.restore_startup(*, initial_frame=None, vmin=None, vmax=None) -> tuple[int, tuple[str, ...]]`：返回局部初始帧与启动提示。先测试无配置返回 `(0, ())`，有效配置恢复范围/变换，pending 存在时不调用 store.load_path。
 
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_cli.py tests/unit/test_viewer.py -k 'startup or omitted_frame' -q`，确认新契约未实现。
-- [ ] CLI 默认改为 None；launch_viewer 先创建无显式温标的 session，调用 restore_startup，再 build_viewer，最后显示启动消息，避免 show_local 清掉报警：
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_cli.py tests/unit/test_viewer.py -k 'startup or omitted_frame' -q`，确认新契约未实现。
+- [x] CLI 默认改为 None；launch_viewer 先创建无显式温标的 session，调用 restore_startup，再 build_viewer，最后显示启动消息，避免 show_local 清掉报警：
 
 ```python
 def launch_viewer(path, initial_frame=None, vmin=None, vmax=None):
@@ -549,7 +549,7 @@ restore_startup 的顺序：先校验 CLI 参数（温标必须成对、有限�
 
 在手动 load_selection 和 apply_selection_document 入口检查源旁 pending，堵住手动加载其他目录配置绕过未完成导出的路径。自动检测不放入 frame_at，切帧/Reset full 不触发重读。
 
-- [ ] 按下表逐项测试，不只覆盖 happy path：
+- [x] 按下表逐项测试，不只覆盖 happy path：
 
 | 场景 | 预期 |
 | --- | --- |
@@ -561,7 +561,7 @@ restore_startup 的顺序：先校验 CLI 参数（温标必须成对、有限�
 | CLI limits 成对覆盖/单个/NaN/倒序 | 规定覆盖/后三者拒绝 |
 | 切帧、Reset full | 不再次调用 restore_startup 或读取配置 |
 
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_cli.py tests/unit/test_viewer.py tests/unit/test_selection.py -q`，通过后提交：`feat: restore verified sidecars when opening SEQ files`。
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_cli.py tests/unit/test_viewer.py tests/unit/test_selection.py -q`，通过后提交：`feat: restore verified sidecars when opening SEQ files`。
 
 ## 任务 10：真实 SEQ、完整回归、文档及交付
 
@@ -648,10 +648,12 @@ if ($seqTestExit -ne 0) { throw "pytest failed with exit code $seqTestExit" }
 | 最小真实源、三份 raw 前后核对、有界缓存 | 10 |
 | Git 分项提交、修正文档、用户验收后发布 | 全部任务及任务 10 |
 
-执行状态：任务 1–8 已实现并验证，任务 9–10 未完成。任务 1 提交 aab11a6；Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。任务 2 目标回归 131 passed（145.73 s），无警告；用 BoundedMessage 在绘制时按 renderer 宽度缩略，完整信息独立保存，F1 输出全文；长度拟合按测量比例收敛，避免逐字重复测量。最小真实 SEQ 的 1000×800 普通/编辑模式渲染图已检查，保存于忽略目录 picture/workflow-layout-20261021；三份 raw 的大小和纳秒 mtime 均未改变。Windows 原生窗口人工验收尚未完成。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。
+执行状态：任务 1–9 已实现并验证，任务 10 未完成。任务 1 提交 aab11a6；Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。任务 2 目标回归 131 passed（145.73 s），无警告；用 BoundedMessage 在绘制时按 renderer 宽度缩略，完整信息独立保存，F1 输出全文；长度拟合按测量比例收敛，避免逐字重复测量。最小真实 SEQ 的 1000×800 普通/编辑模式渲染图已检查，保存于忽略目录 picture/workflow-layout-20261021；三份 raw 的大小和纳秒 mtime 均未改变。Windows 原生窗口人工验收尚未完成。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。
 
 任务 5 提交 f7aabac。任务 6 目标回归 142 passed（159.59 s），请求冻结视图、确认同时覆盖两目标快照，子配置元数据验证不读取温度矩阵；两文件发布尚待任务 7–8。
 
 任务 6 提交 da0cdfc。任务 7 目标回归 44 passed、2 skipped（3.44 s，符号链接权限同上）；覆盖 journal、保护/发布改名、回滚、清理失败，及外部目标/恢复材料改写。恢复失败保留 pending 和材料；最终验证通过后的清理失败不会回滚新输出。
 
 任务 7 提交 cd6f552。任务 8 目标回归 185 passed（142.97 s），后台配套、发布取消门、正式输出校验及保留材料已接通；临时文件清理异常转为带完整路径的失败结果。自动启动恢复和真实配套集成尚待任务 9–10。
+
+任务 8 提交 ea1cb3f。任务 9 目标回归 174 passed（156.43 s）。启动只检查同目录同名配置，v1/v2 在首次绘制前恢复；pending 同时阻止自动与手动套用；CLI 先验证后覆盖，并正确处理源帧与局部帧。温标倒序的原错误文字已保留。
