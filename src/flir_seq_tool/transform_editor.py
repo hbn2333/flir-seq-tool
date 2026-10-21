@@ -8,7 +8,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.text import Text
 from matplotlib.widgets import Button, RectangleSelector, Slider, TextBox
-from .viewer_layout import EDITOR_RECTS, TEXT_POSITIONS, label_above
+from .viewer_layout import BoundedMessage, EDITOR_RECTS, label_above
 
 from .transform import (
     CropRect,
@@ -197,6 +197,7 @@ def build_transform_editor(
     preview_callback: Callable[[FrameTransform], None],
     apply_callback: Callable[[FrameTransform], None],
     cancel_callback: Callable[[], None],
+    message_details: dict[str, str] | None = None,
 ) -> TransformEditorUI:
     if not isinstance(figure, Figure):
         raise ValueError("figure must be a matplotlib Figure")
@@ -246,13 +247,10 @@ def build_transform_editor(
     reset_button = Button(action_axes[1], "Reset")
     cancel_button = Button(action_axes[2], "Cancel")
     apply_button = Button(action_axes[3], "Apply")
-    status_text = figure.text(*TEXT_POSITIONS["editor_status"], "", fontsize=9, va="top")
-    error_text = figure.text(
-        *TEXT_POSITIONS["editor_error"],
-        "",
-        fontsize=9,
-        va="top",
-        color="crimson",
+    details = {} if message_details is None else message_details
+    status_text = BoundedMessage(figure, "editor_status", details, max_lines=1, fontsize=9)
+    error_text = BoundedMessage(
+        figure, "editor_error", details, max_lines=1, fontsize=9, color="crimson",
     )
 
     editor: TransformEditorUI

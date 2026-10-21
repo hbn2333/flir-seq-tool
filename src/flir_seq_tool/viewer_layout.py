@@ -1,5 +1,8 @@
 """Shared figure-coordinate regions for the two viewer modes."""
 
+import textwrap
+
+from matplotlib.text import Text
 from matplotlib.widgets import TextBox
 
 
@@ -40,3 +43,69 @@ def label_above(box: TextBox) -> None:
     box.label.set_position((0.0, 1.12))
     box.label.set_horizontalalignment("left")
     box.label.set_verticalalignment("bottom")
+
+
+def fit_message(text: str, *, max_chars: int, max_lines: int) -> str:
+    if max_chars < 24 or max_lines < 1:
+        raise ValueError("message area too small")
+    lines = []
+    for paragraph in text.splitlines() or [""]:
+        lines.extend(textwrap.wrap(
+            paragraph, width=max_chars, break_long_words=True,
+            break_on_hyphens=False,
+        ) or [""])
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    hint = "... [F1: details]"
+    result = lines[:max_lines]
+    result[-1] = result[-1][:max_chars - len(hint)] + hint
+    return "\n".join(result)
+
+
+class BoundedMessage(Text):
+    """Fit at draw time, retaining the original message for details and resizing.
+
+    Draw-time fitting uses the actual renderer (including DPI changes), without
+    scheduling recursive draws or making callers manage truncated text.
+    """
+
+    def __init__(self, figure, key, details, *, max_lines, fontsize=8.5, color="black"):
+        self.key = key
+        self.details = details
+        self.max_lines = max_lines
+        self._drawing = False
+        super().__init__(
+            *TEXT_POSITIONS[key], text="", fontsize=fontsize, color=color,
+            verticalalignment="top", transform=figure.transFigure,
+            figure=figure, parse_math=False,
+        )
+        figure.add_artist(self)
+
+    def set_text(self, text):
+        original = str(text) if text is not None else ""
+        if not self._drawing:
+            self.details[self.key] = original
+        super().set_text(original)
+
+    def draw(self, renderer):
+        if not self.get_visible():
+            return
+        original = self.details[self.key]
+        available = max(1, (0.95 - self.get_position()[0]) * self.figure.bbox.width)
+        # A fixed upper bound also keeps fitting predictable for huge messages.
+        max_chars = min(max(24, int(available / 3)), max(24, len(original)))
+        while True:
+            displayed = fit_message(original, max_chars=max_chars, max_lines=self.max_lines)
+            width = max((renderer.get_text_width_height_descent(
+                line, self.get_fontproperties(), ismath=False,
+            )[0] for line in displayed.splitlines()), default=0)
+            if width <= available or max_chars <= 24:
+                break
+            max_chars = max(24, min(max_chars - 1, int(max_chars * available / width)))
+        # Bypass our set_text: fitted content must never replace the full details.
+        super().set_text(displayed)
+        self._drawing = True
+        try:
+            super().draw(renderer)
+        finally:
+            self._drawing = False

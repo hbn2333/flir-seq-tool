@@ -140,7 +140,7 @@ def test_angle_value_does_not_overlap_total_box(size, dpi):
 
 文件：修改 `src/flir_seq_tool/viewer_layout.py`、`src/flir_seq_tool/viewer.py`、`src/flir_seq_tool/transform_editor.py`；测试 `tests/unit/test_viewer_layout.py`、`tests/unit/test_viewer.py`。
 
-- [ ] 写有限宽度、超长路径及窄窗口测试。布局模块提供 `fit_message(text, *, max_chars, max_lines) -> str`，保持换行、支持无空格路径；过长信息末尾明确标记详情入口。测试代码：
+- [x] 写有限宽度、超长路径及窄窗口测试。布局模块提供 `fit_message(text, *, max_chars, max_lines) -> str`，保持换行、支持无空格路径；过长信息末尾明确标记详情入口。测试代码：
 
 ```python
 from flir_seq_tool.viewer_layout import fit_message
@@ -153,8 +153,8 @@ def test_long_message_is_bounded_without_losing_detail_hint():
     assert "F1" in displayed
 ```
 
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_viewer_layout.py -q`，先确认新增测试失败。
-- [ ] 实现纯文本边界函数；界面保留完整字符串，不用显示字符串反向覆盖原信息：
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_viewer_layout.py -q`，先确认新增测试失败。
+- [x] 实现纯文本边界函数；界面保留完整字符串，不用显示字符串反向覆盖原信息：
 
 ```python
 import textwrap
@@ -179,8 +179,8 @@ def fit_message(text, *, max_chars, max_lines):
 
 resize 回调使用画布英寸尺寸判断逻辑最小 10×8；低于此尺寸显示 `Enlarge window to at least 1000 x 800 logical pixels`。用 renderer 实测文本可用宽度迭代降低 `max_chars`，限制每块的最大行数；绘制回调设重入保护，不在每次 draw 递归触发 draw。
 
-- [ ] 新增长错误/导出路径/编辑草稿文字、单帧模式、连续 resize 的 bbox 测试，验证 F1 输出包含未截断全文（`capsys`）；低于最小尺寸只要求提示清楚，不宣称控件全部可用。
-- [ ] 执行 `& $seqPython -m pytest tests/unit/test_viewer_layout.py tests/unit/test_viewer.py tests/unit/test_transform_editor.py -q`，通过后提交：`fix: bound viewer messages and expose full details`。
+- [x] 新增长错误/导出路径/编辑草稿文字、单帧模式、连续 resize 的 bbox 测试，验证 F1 输出包含未截断全文（`capsys`）；低于最小尺寸只要求提示清楚，不宣称控件全部可用。
+- [x] 执行 `& $seqPython -m pytest tests/unit/test_viewer_layout.py tests/unit/test_viewer.py tests/unit/test_transform_editor.py -q`，通过后提交：`fix: bound viewer messages and expose full details`。
 
 检查点 A：布局测试通过可展示截图给用户；真实 Windows 窗口验收仍留到任务 10，不用 Agg 测试冒充人工验收。
 
@@ -646,4 +646,4 @@ if ($seqTestExit -ne 0) { throw "pytest failed with exit code $seqTestExit" }
 | 最小真实源、三份 raw 前后核对、有界缓存 | 10 |
 | Git 分项提交、修正文档、用户验收后发布 | 全部任务及任务 10 |
 
-执行状态：任务 1 已实现并验证，任务 2–10 未完成。任务 1 的 Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。
+执行状态：任务 1–2 已实现并验证，任务 3–10 未完成。任务 1 提交 aab11a6；Total 输入框根据 renderer 测试从计划坐标下移，避免 1000×800 下标签接触当前帧滑块。基线 298 passed（83.85 s，pytest 缓存权限警告 1 条），raw 三文件大小/mtime 不变；后续关闭 cacheprovider，任务 1 目标回归 120 passed（112.68 s），无警告。任务 2 目标回归 131 passed（145.73 s），无警告；用 BoundedMessage 在绘制时按 renderer 宽度缩略，完整信息独立保存，F1 输出全文；长度拟合按测量比例收敛，避免逐字重复测量。最小真实 SEQ 的 1000×800 普通/编辑模式渲染图已检查，保存于忽略目录 picture/workflow-layout-20261021；三份 raw 的大小和纳秒 mtime 均未改变。Windows 原生窗口人工验收尚未完成。尚未完成的新增函数/字段仍是实施契约，不表示当前代码已具备。

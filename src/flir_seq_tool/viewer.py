@@ -36,7 +36,7 @@ from .selection import (
 from .timeline import TimelineState
 from .transform import FrameTransform
 from .transform_editor import TransformDraft, TransformEditorUI, build_transform_editor
-from .viewer_layout import NORMAL_RECTS, TEXT_POSITIONS
+from .viewer_layout import BoundedMessage, NORMAL_RECTS
 
 
 WORKSPACE_ROOT = Path(r"D:\carbonfoam\infrared")
@@ -322,6 +322,8 @@ class ViewerUI:
     status_text: Text
     error_text: Text
     session: ViewerSession
+    message_details: dict[str, str]
+    size_warning_text: Text
 
 
 def transform_status(transform: FrameTransform, dirty: bool) -> str:
@@ -424,11 +426,17 @@ def build_viewer(
     export_button = Button(export_axes, "Export sub-SEQ")
     cancel_button = Button(cancel_axes, "Cancel export")
     cancel_button.set_active(False)
-    export_text = figure.text(*TEXT_POSITIONS["export"], "", fontsize=7.5, va="top")
-    progress_text = figure.text(*TEXT_POSITIONS["progress"], "", fontsize=8.5, va="top")
-    transform_status_text = figure.text(*TEXT_POSITIONS["transform"], "", fontsize=8.5, va="top")
-    status_text = figure.text(*TEXT_POSITIONS["timeline"], "", fontsize=8.5, va="top")
-    error_text = figure.text(*TEXT_POSITIONS["message"], "", fontsize=8.5, color="crimson", va="top")
+    message_details: dict[str, str] = {}
+    export_text = BoundedMessage(figure, "export", message_details, max_lines=3, fontsize=7.5)
+    progress_text = BoundedMessage(figure, "progress", message_details, max_lines=1)
+    transform_status_text = BoundedMessage(figure, "transform", message_details, max_lines=1)
+    status_text = BoundedMessage(figure, "timeline", message_details, max_lines=2)
+    error_text = BoundedMessage(figure, "message", message_details, max_lines=2, color="crimson")
+    size_warning_text = figure.text(
+        0.5, 0.98, "Enlarge window to at least 1000 x 800 logical pixels",
+        ha="center", va="top", fontsize=9, color="crimson", visible=False,
+    )
+    details_notice = figure.text(0.15, 0.016, "", fontsize=7, va="top")
     export_state = ViewerExportState()
     mode_state = ViewerModeState()
     updating = False
@@ -449,6 +457,7 @@ def build_viewer(
     )
 
     def set_error(message: str = "", *, error: bool = True) -> None:
+        details_notice.set_text("")
         error_text.set_text(message)
         error_text.set_color("crimson" if error else "forestgreen")
         figure.canvas.draw_idle()
@@ -870,6 +879,22 @@ def build_viewer(
             job.cancel()
             job.join(timeout=0.25)
 
+    def on_resize(_event: Any) -> None:
+        width, height = figure.get_size_inches()
+        size_warning_text.set_visible(width < 10 or height < 8)
+        figure.canvas.draw_idle()
+
+    def on_key(event: Any) -> None:
+        if event.key != "f1":
+            return
+        hidden = {"export", "progress"} if mode_state.editing_transform else {"editor_error", "editor_status"}
+        print("\n".join(
+            f"{key}: {value}" for key, value in message_details.items()
+            if key not in hidden and value
+        ))
+        details_notice.set_text("Full details printed to console")
+        figure.canvas.draw_idle()
+
     transform_editor = build_transform_editor(
         figure=figure,
         image_axes=axes,
@@ -877,6 +902,7 @@ def build_viewer(
         preview_callback=on_preview_transform,
         apply_callback=on_apply_transform,
         cancel_callback=on_cancel_transform,
+        message_details=message_details,
     )
     transform_editor.set_visible(False)
 
@@ -899,6 +925,8 @@ def build_viewer(
     export_button.on_clicked(on_export)
     cancel_button.on_clicked(on_cancel)
     figure.canvas.mpl_connect("close_event", on_close)
+    figure.canvas.mpl_connect("resize_event", on_resize)
+    figure.canvas.mpl_connect("key_press_event", on_key)
     export_state.timer = figure.canvas.new_timer(interval=100)
     export_state.timer.add_callback(poll_export)
     sync_all_controls()
@@ -931,6 +959,8 @@ def build_viewer(
         status_text=status_text,
         error_text=error_text,
         session=session,
+        message_details=message_details,
+        size_warning_text=size_warning_text,
     )
 
 

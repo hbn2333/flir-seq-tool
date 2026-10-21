@@ -8,7 +8,8 @@ import matplotlib
 matplotlib.use("Agg", force=True)
 
 import matplotlib.pyplot as plt
-from matplotlib.backend_bases import CloseEvent, MouseEvent
+from matplotlib.text import Text
+from matplotlib.backend_bases import CloseEvent, MouseEvent, KeyEvent, ResizeEvent
 import numpy as np
 import pytest
 
@@ -311,7 +312,7 @@ def test_controls_and_information_do_not_overlap(size, dpi, editing):
         controls += list(ui.transform_editor.control_axes if editing else ui.normal_control_axes)
         controls = [ax for ax in controls if ax.get_visible()]
         texts = [text for ax in controls for text in ax.texts]
-        texts += list(ui.figure.texts)
+        texts += [child for child in ui.figure.get_children() if isinstance(child, Text)]
         texts = [t for t in texts if t.get_visible() and t.get_text()]
         for text in texts:
             box = text.get_window_extent(renderer)
@@ -344,6 +345,75 @@ def test_editor_frame_navigation_keeps_draft_and_uses_full_preview():
         ui.transform_editor.draft.build().rotated_shape
     )
     plt.close(ui.figure)
+
+
+@pytest.mark.parametrize("editing", [False, True])
+@pytest.mark.parametrize("dpi", [100, 150, 200])
+def test_long_messages_fit_and_full_details_survive_resize(editing, dpi, capsys):
+    ui = build_viewer(ViewerSession(FakeTemperatureReader(make_frames())))
+    ui.figure.set_dpi(dpi)
+    original = "Save failed: D:/" + "WideWWWdirectory/" * 40 + "a.selection.json"
+    try:
+        if editing:
+            ui.edit_transform_button._observers.process("clicked", None)
+        ui.error_text.set_text(original)
+        ui.export_text.set_text(original)
+        ui.progress_text.set_text(original)
+        ui.transform_editor.error_text.set_text(original)
+        ui.transform_editor.status_text.set_text(original)
+        for size in [(10, 8), (16, 10), (10, 8)]:
+            ui.figure.set_size_inches(*size)
+            ui.figure.canvas.callbacks.process("resize_event", ResizeEvent("resize_event", ui.figure.canvas))
+            ui.figure.canvas.draw()
+            renderer = ui.figure.canvas.get_renderer()
+            texts = [ui.error_text, ui.status_text, ui.transform_status_text]
+            texts += ([ui.transform_editor.error_text, ui.transform_editor.status_text]
+                      if editing else [ui.export_text, ui.progress_text])
+            for index, text in enumerate(texts):
+                box = text.get_window_extent(renderer)
+                assert ui.figure.bbox.contains(box.x0, box.y0), text.get_text()
+                assert ui.figure.bbox.contains(box.x1, box.y1), text.get_text()
+                for other in texts[index + 1:]:
+                    assert not box.overlaps(other.get_window_extent(renderer))
+        assert ui.message_details["message"] == original
+        assert "F1" in ui.error_text.get_text()
+        ui.figure.canvas.callbacks.process("key_press_event", KeyEvent("key_press_event", ui.figure.canvas, key="f1"))
+        assert original in capsys.readouterr().out
+        assert ui.message_details["message"] == original
+    finally:
+        plt.close(ui.figure)
+
+
+def test_small_window_warning_is_removed_when_resized():
+    ui = build_viewer(ViewerSession(FakeTemperatureReader(make_frames(count=1))))
+    try:
+        ui.figure.set_size_inches(8, 6)
+        ui.figure.canvas.callbacks.process("resize_event", ResizeEvent("resize_event", ui.figure.canvas))
+        ui.figure.canvas.draw()
+        assert ui.size_warning_text.get_visible()
+        assert "1000 x 800" in ui.size_warning_text.get_text()
+        ui.figure.set_size_inches(10, 8)
+        ui.figure.canvas.callbacks.process("resize_event", ResizeEvent("resize_event", ui.figure.canvas))
+        assert not ui.size_warning_text.get_visible()
+        assert not ui.slider.ax.get_visible()
+    finally:
+        plt.close(ui.figure)
+
+
+def test_microsecond_timestamp_title_stays_inside_minimum_canvas():
+    frame = TemperatureFrame(
+        frame_index=0, timestamp=datetime(2026, 8, 28, 9, 26, 37, 152000),
+        temperature_c=np.ones((480, 640)),
+    )
+    ui = build_viewer(ViewerSession(FakeTemperatureReader([frame] * 65)))
+    try:
+        ui.figure.set_size_inches(10, 8)
+        ui.figure.canvas.draw()
+        title = ui.axes.title.get_window_extent(ui.figure.canvas.get_renderer())
+        assert ui.figure.bbox.contains(title.x0, title.y0)
+        assert ui.figure.bbox.contains(title.x1, title.y1)
+    finally:
+        plt.close(ui.figure)
 
 
 def test_cancel_restores_applied_view_and_apply_marks_unsaved():
