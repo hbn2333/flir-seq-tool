@@ -2,7 +2,7 @@
 
 用于 FLIR ResearchIR FFF `.seq` 红外序列的本地检查、温度浏览、旋转裁剪与矩形区域分析。通过官方 FLIR Science File SDK 逐帧读取摄氏温度，提供 **Process（预处理）** 和 **Measure（测量）** 两个页面。
 
-本工具不将整个 SEQ 载入内存，适合对较长序列选择时间范围、比较区域温度，并导出数据供后续分析。它不是导热系数反演软件。
+本工具不将整个 SEQ 载入内存，适合对较长序列选择时间范围、比较区域温度，并导出数据供后续分析。
 
 ## 功能
 
@@ -17,7 +17,7 @@
 
 ## 环境与安装
 
-已验证环境为 **Windows x64、Python 3.13.5、FLIR Science File SDK 2026.1.2**。其他操作系统、Python 和 SDK 版本尚未验证。
+已验证环境为 **Windows x64、Python 3.13.5、FLIR Science File SDK 2026.1.2**
 
 ### 1. 准备官方 SDK
 
@@ -92,12 +92,24 @@ NumPy、SciPy 和 Matplotlib 由项目依赖声明安装；官方 SDK 需单独�
 
 标题和状态区同时显示局部帧、源帧、绝对时间、相对时间和持续时间。相对时间以当前工作范围首帧为零，**不是实验加热起点**。上述操作不会改写原始 SEQ。
 
+![图 1：在 Process 页面选择候选帧范围](docs/images/fig1-frame-range.png)
+
+*图 1｜时间范围选择（帧裁剪）。使用 Selected range 或 Start frame / End frame 指定候选区间，再点击 Confirm range 确认。截图展示的是尚未确认的候选范围；若要生成独立子 SEQ，需另行导出。*
+
 ### 旋转与裁剪
 
 1. 点击 `Edit transform`。
 2. 用 ±90° / 180° 快捷按钮调整方向，再用 `Fine angle` 在当前直角方向的 ±15° 内微调，精度 0.1°；`Total` 输入总角度。
 3. 拖动裁剪框或手柄，也可输入整数 `x / y / width / height`。这些坐标属于旋转后的画布。
 4. `Apply` 应用，`Cancel` 放弃草稿；之后可以重新编辑。
+
+![图 2：调整旋转角度并拖动裁剪框](docs/images/fig2-rotate-crop-editor.png)
+
+*图 2｜旋转裁剪编辑。示例将总角度调整为 −2.1°，并用裁剪框选择保留区域；也可通过 x、y、width、height 输入框精确调整。此时仍是草稿。*
+
+![图 3：应用旋转与裁剪后的图像视图](docs/images/fig3-rotate-crop-applied.png)
+
+*图 3｜应用后的视图。点击 Apply 后，图像按选定角度和裁剪范围显示，像素坐标从裁剪后图像的左上角重新起算。Apply 不等于保存配置，也不会改写原始 SEQ。*
 
 改变角度会重置裁剪框。`Maximum` 选择最大有效矩形，旋转空白区不可纳入有效裁剪。`Reset` 恢复未旋转、未裁剪的草稿，需 Apply 才生效。
 
@@ -117,6 +129,10 @@ Measure 使用 **已 Confirm range 的范围**和**已 Apply 的变换**，不�
 - 勾选列表框：控制帧曲线及曲线导出包含哪些 ROI。
 - ROI 坐标使用裁剪后的图像坐标系，左上角为原点，x 向右、y 向下，单位为像素。
 
+![图 4：在 Measure 页面添加矩形 ROI 并查看当前帧温度分布](docs/images/fig4-add-roi.png)
+
+*图 4｜添加矩形 ROI。点击 Add ROI 后在图像中拖框，右侧显示区域参数和当前帧统计，下方 Distribution 显示温度分布。截图底部提示候选时间范围尚未应用；测量仍使用已确认的工作范围。*
+
 ### 当前帧
 
 统计卡片给出均值、最小值、最大值、温差、总体标准差（ddof=0）及有效/总像素数，仅统计有限温度值。
@@ -133,15 +149,19 @@ Measure 使用 **已 Confirm range 的范围**和**已 Apply 的变换**，不�
 
 改变范围或 ROI 几何后必须重新计算。改名、勾选和切换显示指标不需重算。曲线显示可能抽稀以改善性能，但 CSV 保留全部统计行。计算使用临时 SQLite 存储，不保存全序列温度矩阵到内存。
 
+![图 5：三个矩形 ROI 的平均温度与区域内温差曲线](docs/images/fig5-multiple-roi-curves.png)
+
+*图 5｜多个 ROI 与帧曲线。勾选需要比较的区域，在 Frame curves 中点击 Calculate。示例上图显示各 ROI 的平均温度，下图显示各 ROI 内的最大最小温差 ΔT；曲线颜色与区域颜色对应，横轴为已确认范围内的局部帧号。*
+
 ## 保存、加载与导出
 
-| 操作 | 保存内容 | 注意事项 |
-| --- | --- | --- |
-| Process：Save selection | 候选帧范围、已应用变换、温标和 ROI 设置 | 候选范围可能不同于测量范围 |
-| Measure：Save setup | 已确认工作范围、已应用变换、温标和 ROI 设置 | 不包含已计算的帧曲线 |
-| Process：Load selection | 打开用户选定的配置 | 不是自动选择最新文件；加载后曲线需重新计算 |
-| Export CSV / PNG | 当前分析子视图对应的数据或图像 | 先切到需要导出的 Distribution、Profile 或 Frame curves |
-| Export sub-SEQ | 所选时间段的原始帧及同名视图配置 | 不把旋转裁剪结果写入 SEQ 像素 |
+| 操作                    | 保存内容                                    | 注意事项                                               |
+| ----------------------- | ------------------------------------------- | ------------------------------------------------------ |
+| Process：Save selection | 候选帧范围、已应用变换、温标和 ROI 设置     | 候选范围可能不同于测量范围                             |
+| Measure：Save setup     | 已确认工作范围、已应用变换、温标和 ROI 设置 | 不包含已计算的帧曲线                                   |
+| Process：Load selection | 打开用户选定的配置                          | 不是自动选择最新文件；加载后曲线需重新计算             |
+| Export CSV / PNG        | 当前分析子视图对应的数据或图像              | 先切到需要导出的 Distribution、Profile 或 Frame curves |
+| Export sub-SEQ          | 所选时间段的原始帧及同名视图配置            | 不把旋转裁剪结果写入 SEQ 像素                          |
 
 ### 配置文件
 
