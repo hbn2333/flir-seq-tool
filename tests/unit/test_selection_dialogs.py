@@ -6,6 +6,50 @@ import sys
 import pytest
 
 
+@pytest.mark.parametrize("value, expected", [
+    ("", None), ("sample", Path("sample.seq")),
+    ("sample.seq", Path("sample.seq")), ("sample.SEQ", Path("sample.SEQ")),
+])
+def test_normalize_seq_path(value, expected):
+    from flir_seq_tool.selection_dialogs import normalize_seq_path
+    assert normalize_seq_path(value) == expected
+
+
+@pytest.mark.parametrize("value", ["a.csv", "a.", "a ", "CON.seq"])
+def test_normalize_seq_path_rejects_invalid_names(value):
+    from flir_seq_tool.selection_dialogs import normalize_seq_path
+    with pytest.raises(ValueError):
+        normalize_seq_path(value)
+
+
+def test_choose_seq_export(fake_tk, tmp_path):
+    from flir_seq_tool.selection_dialogs import SelectionDialogs
+    roots, calls, behavior, _, _ = fake_tk
+    behavior.value = str(tmp_path / "chosen.SEQ")
+    assert SelectionDialogs().choose_seq_export(tmp_path, "suggested.seq") == Path(behavior.value)
+    assert calls[0]["initialfile"] == "suggested.seq"
+    assert calls[0]["initialdir"] == str(tmp_path)
+    assert calls[0]["confirmoverwrite"] is False
+    assert roots[0].destroyed
+
+
+def test_seq_dialog_cancel_failure_and_thread_guard(fake_tk, tmp_path):
+    from flir_seq_tool.selection_dialogs import SelectionDialogs
+    roots, calls, behavior, _, TclError = fake_tk
+    dialogs = SelectionDialogs()
+    target = tmp_path / "not-created"
+    assert dialogs.choose_seq_export(target, "a.seq") is None
+    behavior.error = TclError("unavailable")
+    with pytest.raises(RuntimeError, match="unavailable"):
+        dialogs.choose_seq_export(target, "a.seq")
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with pytest.raises(RuntimeError, match="main thread"):
+            executor.submit(dialogs.choose_seq_export, target, "a.seq").result()
+    assert len(calls) == 2
+    assert all(root.destroyed for root in roots)
+    assert not target.exists()
+
+
 @pytest.mark.parametrize("text, expected", [
     ("", None), ("experiment", Path("experiment.selection.json")),
     ("experiment.selection.json", Path("experiment.selection.json")),

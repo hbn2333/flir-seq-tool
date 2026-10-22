@@ -28,6 +28,19 @@ def normalize_analysis_path(value: str, kind: str) -> Path | None:
     return path.with_suffix("." + kind)
 
 
+def normalize_seq_path(value: str) -> Path | None:
+    if not value:
+        return None
+    path = Path(value)
+    if not path.name or path.name.endswith((".", " ")):
+        raise ValueError("Use a .seq filename")
+    if path.suffix and path.suffix.lower() != ".seq":
+        raise ValueError("Use a .seq filename")
+    from .extraction import normalize_clip_name
+    normalize_clip_name(path.name)
+    return path if path.suffix else path.with_suffix(".seq")
+
+
 class SelectionDialogs:
     def __init__(self, parent=None):
         self.parent = parent
@@ -66,6 +79,14 @@ class SelectionDialogs:
             confirmoverwrite=False,
         )
         return normalize_selection_path(value)
+
+    def choose_seq_export(self, initial_dir: Path, suggested_name: str) -> Path | None:
+        value = self._run(
+            "file", "asksaveasfilename", title="Export sub-SEQ",
+            initialdir=str(initial_dir), initialfile=suggested_name,
+            filetypes=[("FLIR SEQ", "*.seq")], confirmoverwrite=False,
+        )
+        return normalize_seq_path(value)
 
     def choose_load(self, initial_dir: Path) -> Path | None:
         value = self._run(
