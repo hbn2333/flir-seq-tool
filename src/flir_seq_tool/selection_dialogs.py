@@ -15,6 +15,19 @@ def normalize_selection_path(value: str) -> Path | None:
     return path.with_name(path.name + ".selection.json")
 
 
+def normalize_analysis_path(value: str, kind: str) -> Path | None:
+    if kind not in ("csv", "png"):
+        raise ValueError("unknown analysis export kind")
+    if not value:
+        return None
+    path = Path(value)
+    if path.suffix.lower() == "." + kind:
+        return path
+    if path.suffix or path.name.endswith((".", " ")) or not path.name:
+        raise ValueError(f"Use a .{kind} filename")
+    return path.with_suffix("." + kind)
+
+
 class SelectionDialogs:
     def __init__(self, parent=None):
         self.parent = parent
@@ -45,9 +58,9 @@ class SelectionDialogs:
                 except tk.TclError as exc:
                     raise RuntimeError(f"Native dialog cleanup failed: {exc}") from exc
 
-    def choose_save(self, initial_dir: Path, suggested_name: str) -> Path | None:
+    def choose_save(self, initial_dir: Path, suggested_name: str, *, title="Save selection") -> Path | None:
         value = self._run(
-            "file", "asksaveasfilename", title="Save selection",
+            "file", "asksaveasfilename", title=title,
             initialdir=str(initial_dir), initialfile=suggested_name,
             filetypes=[("Selection JSON", "*.selection.json")],
             confirmoverwrite=False,
@@ -61,6 +74,14 @@ class SelectionDialogs:
             filetypes=[("Selection JSON", "*.selection.json")],
         )
         return Path(value) if value else None
+
+    def choose_analysis_export(self, kind: str, initial_dir: Path, suggested_name: str) -> Path | None:
+        if kind not in ("csv", "png"):
+            raise ValueError("unknown analysis export kind")
+        value = self._run("file", "asksaveasfilename", title=f"Export {kind.upper()}",
+                          initialdir=str(initial_dir), initialfile=suggested_name,
+                          filetypes=[(kind.upper(), "*." + kind)], confirmoverwrite=False)
+        return normalize_analysis_path(value, kind)
 
     def confirm(self, message: str) -> bool:
         return bool(self._run("message", "askyesno", title="Confirm selection", message=message))

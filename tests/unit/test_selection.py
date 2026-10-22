@@ -17,6 +17,7 @@ from flir_seq_tool.selection import (
     validate_source_identity,
 )
 from flir_seq_tool.transform import CropRect, FrameTransform, RotationSettings
+from flir_seq_tool.measurement_models import MeasurementSettings, Roi
 
 
 START = datetime(2026, 8, 28, 9, 26, 37, 152000)
@@ -44,6 +45,43 @@ def sample_document(path: Path) -> SelectionDocument:
         end_timestamp=START + timedelta(seconds=1.78),
         display=DisplaySettings("inferno", 22.5, 34.5),
     )
+
+
+def test_v3_roundtrip_preserves_measurement(tmp_path):
+    roi = Roi("r1", "ROI 1", 1, 2, 3, 4, "#1f77b4", True)
+    settings = MeasurementSettings(rois=(roi,), active_roi_id="r1")
+    document = replace(sample_document(tmp_path / "source.seq"), measurement=settings)
+    encoded = document.to_dict()
+    assert encoded["schema_version"] == 3
+    assert encoded["measurement"]["coordinate_space"] == "cropped_pixel"
+    assert SelectionDocument.from_dict(encoded) == document
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_old_versions_read_as_empty_measurement_without_rewriting(tmp_path, version):
+    source = tmp_path / "source.seq"
+    store = SelectionStore(tmp_path / "selections")
+    encoded = sample_document(source).to_dict()
+    encoded["schema_version"] = version
+    encoded.pop("measurement", None)
+    if version == 1:
+        encoded.pop("transform")
+    target = store.path_for(source)
+    target.parent.mkdir()
+    target.write_text(json.dumps(encoded), encoding="utf-8")
+    original = target.read_bytes()
+    loaded = store.load(source)
+    assert loaded.measurement == MeasurementSettings()
+    assert loaded.schema_version == 3
+    assert target.read_bytes() == original
+
+
+def test_v3_rejects_roi_outside_cropped_dimensions(tmp_path):
+    document = sample_document(tmp_path / "source.seq")
+    roi = Roi("r1", "ROI 1", 0, 0, 4, 4, "#1f77b4", True)
+    transform = replace(document.transform, crop=CropRect(0, 0, 2, 2))
+    with pytest.raises(ValueError, match="bounds"):
+        replace(document, transform=transform, measurement=MeasurementSettings((roi,)))
 
 
 def test_partial_json_write_failure_cleans_its_temporary_file(tmp_path, monkeypatch):
@@ -74,8 +112,9 @@ def test_selection_document_round_trip_uses_iso_timestamps(tmp_path: Path):
         "selection",
         "display",
         "transform",
+        "measurement",
     }
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["source"]["first_timestamp"] == START.isoformat()
     assert payload["transform"] == {
         "rotation": {
@@ -89,12 +128,13 @@ def test_selection_document_round_trip_uses_iso_timestamps(tmp_path: Path):
     assert SelectionDocument.from_dict(payload) == document
 
 
-def test_selection_store_loads_v1_as_v2_without_rewriting_file(tmp_path: Path):
+def test_selection_store_loads_v1_as_v3_without_rewriting_file(tmp_path: Path):
     source_path = tmp_path / "sample.seq"
     store = SelectionStore(tmp_path / "selections")
     payload = sample_document(source_path).to_dict()
     payload["schema_version"] = 1
     payload.pop("transform")
+    payload.pop("measurement")
     target = store.path_for(source_path)
     target.parent.mkdir(parents=True)
     original_bytes = (json.dumps(payload, indent=2) + "\n").encode("utf-8")
@@ -102,7 +142,7 @@ def test_selection_store_loads_v1_as_v2_without_rewriting_file(tmp_path: Path):
 
     loaded = store.load(source_path)
 
-    assert loaded.schema_version == 2
+    assert loaded.schema_version == 3
     assert loaded.transform == FrameTransform.identity(640, 480)
     assert target.read_bytes() == original_bytes
 
@@ -141,7 +181,7 @@ def test_selection_document_round_trips_nonzero_transform(tmp_path: Path):
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
-        (lambda p: p.update(schema_version=3), "unsupported schema_version"),
+        (lambda p: p.update(schema_version=4), "unsupported schema_version"),
         (lambda p: p["selection"].pop("frame_count"), "keys"),
         (lambda p: p["source"].update(num_frames=True), "num_frames"),
         (lambda p: p["selection"].update(source_start_frame=65), "range"),
@@ -252,10 +292,12 @@ def test_selection_document_constructor_requires_integer_schema_version(
     with pytest.raises(ValueError, match="schema_version.*integer"):
         replace(document, schema_version=schema_version)
 
-@pytest.mark.parametrize("schema_version", [1, 2])
+@pytest.mark.parametrize("schema_version", [1, 2, 3])
 def test_selection_document_rejects_unknown_root_key(tmp_path, schema_version):
     payload = sample_document(tmp_path / "sample.seq").to_dict()
     payload["schema_version"] = schema_version
+    if schema_version < 3:
+        payload.pop("measurement")
     if schema_version == 1:
         payload.pop("transform")
     payload["extra"] = True

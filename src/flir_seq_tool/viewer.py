@@ -26,6 +26,10 @@ from .extraction import (
     preflight_export,
 )
 from .models import TemperatureFrame
+from .measurement_state import AnalysisKey, MeasureState
+from .measurement_panel import MeasurePanel, build_measure_panel
+from .measurement_job import AnalysisJob, AnalysisRequest
+from .measurement_export import AnalysisExportSnapshot, export_csv, export_png
 from .reader import ScienceFileReader
 from .selection import (
     DisplaySettings,
@@ -34,6 +38,7 @@ from .selection import (
     SourceIdentity,
     build_selection_document,
     validate_source_identity,
+    transform_to_dict,
 )
 from .selection_dialogs import SelectionDialogs
 from .file_safety import TargetSnapshot
@@ -41,7 +46,10 @@ from .export_bundle import sidecar_path, pending_path
 from .timeline import TimelineState
 from .transform import FrameTransform
 from .transform_editor import TransformDraft, TransformEditorUI, build_transform_editor
-from .viewer_layout import BoundedMessage, NORMAL_RECTS
+from .viewer_layout import (BoundedMessage, NORMAL_RECTS, NAV_RECTS, MEASURE_IMAGE_RECT,
+                            MEASURE_COLORBAR_RECT, MEASURE_CURRENT_RECT, MEASURE_RESULT_RECT,
+                            MEASURE_CURVE_DELTA_RECT, label_above)
+from .viewer_pages import PageCoordinator, PageGroup
 
 
 WORKSPACE_ROOT = Path(r"D:\carbonfoam\infrared")
@@ -92,11 +100,17 @@ class ViewerSession:
         self._preview_transformer: FrameTransformer | None = None
         self.selection_dirty = False
         self.selection_path: Path | None = None
-        self._clean_state_signature: str | None = None
+        self.process_saved_signature: str | None = None
+        self.measure_saved_signature: str | None = None
+        self.measurement = MeasureState()
+        self._retired_measurement_stores: list[Any] = []
+        self.measurement_cleanup_error: str | None = None
         self.timeline = TimelineState(reader.num_frames)
         self._work_time_key: tuple[int, int] | None = None
         self._work_time_value: tuple[datetime, datetime] | None = None
         self.color_limits = explicit_limits
+        if self.color_limits is not None:
+            self._establish_saved_signatures()
 
     def _check_pending(self) -> None:
         marker = pending_path(Path(self.reader.path))
@@ -146,6 +160,8 @@ class ViewerSession:
         )
         if self.color_limits is None:
             self.color_limits = compute_color_limits(frame.temperature_c)
+        if self.process_saved_signature is None:
+            self._establish_saved_signatures()
         return frame
 
     def _transform_frame(self, frame_index: int) -> TemperatureFrame:
@@ -199,11 +215,36 @@ class ViewerSession:
         self.transformed_cache.clear()
         self._preview_transformer_key = None
         self._preview_transformer = None
+        self.release_measurement_store(self.measurement.clear())
         self.selection_dirty = True
 
+    def release_measurement_store(self, store: Any | None) -> None:
+        """Retain cleanup ownership on failure without undoing a committed state change."""
+        if store is None:
+            return
+        self._retired_measurement_stores.append(store)
+        self._cleanup_retired_measurement_stores()
+
+    def _cleanup_retired_measurement_stores(self) -> None:
+        self.measurement_cleanup_error = None
+        for store in tuple(self._retired_measurement_stores):
+            try:
+                store.cleanup()
+            except Exception as exc:
+                self.measurement_cleanup_error = str(exc)
+            else:
+                self._retired_measurement_stores.remove(store)
+
+    def cleanup_measurement_results(self) -> None:
+        previous = self.measurement.clear()
+        if previous is not None:
+            self._retired_measurement_stores.append(previous)
+        self._cleanup_retired_measurement_stores()
+
     def frame_at_local(self, local_frame: int) -> TemperatureFrame:
+        frame = self.frame_at(self.timeline.source_frame_at(local_frame))
         self.timeline.set_current(local_frame)
-        return self.frame_at(self.timeline.source_frame_at(local_frame))
+        return frame
 
     def work_timestamps(self) -> tuple[datetime, datetime]:
         key = (self.timeline.source_start, self.timeline.source_end)
@@ -232,11 +273,37 @@ class ViewerSession:
             last_timestamp=self.reader.timestamp_at(self.reader.num_frames - 1),
         )
 
-    def selection_document(self) -> SelectionDocument:
+    def measure_source_range(self) -> tuple[int, int]:
+        return self.timeline.source_start, self.timeline.source_end
+
+    def selection_source_range(self, scope: str) -> tuple[int, int]:
+        if scope == "measure":
+            return self.measure_source_range()
+        if scope == "process":
+            return (self.timeline.source_frame_at(self.timeline.pending_start),
+                    self.timeline.source_frame_at(self.timeline.pending_end))
+        raise ValueError("unknown selection scope")
+
+    def confirm_range(self) -> bool:
+        changed = self.timeline.confirm_range()
+        if changed:
+            self.measurement.invalidate()
+        return changed
+
+    def reset_full(self) -> None:
+        before = self.measure_source_range()
+        self.timeline.reset_full()
+        if self.measure_source_range() != before:
+            self.measurement.invalidate()
+
+    def analysis_key(self) -> AnalysisKey:
+        return AnalysisKey.from_inputs(self.source_identity(), *self.measure_source_range(),
+                                       self.applied_transform, self.measurement.settings.rois)
+
+    def selection_document(self, *, scope: str = "process") -> SelectionDocument:
         if self.color_limits is None:
             raise RuntimeError("viewer color limits were not initialized")
-        source_start = self.timeline.source_frame_at(self.timeline.pending_start)
-        source_end = self.timeline.source_frame_at(self.timeline.pending_end)
+        source_start, source_end = self.selection_source_range(scope)
         return build_selection_document(
             source=self.source_identity(),
             source_start_frame=source_start,
@@ -249,25 +316,32 @@ class ViewerSession:
                 vmax_c=self.color_limits.vmax,
             ),
             transform=self.applied_transform,
+            measurement=self.measurement.settings,
         )
 
     def save_selection(
         self, target: Path | None = None, *,
+        scope: str = "process",
         expected_target: TargetSnapshot | None = None,
         expected_backup: TargetSnapshot | None = None,
     ) -> Path:
         if target is None:
-            target = self.selection_store.save(Path(self.reader.path), self.selection_document())
+            target = self.selection_store.save(Path(self.reader.path), self.selection_document(scope=scope))
         else:
             if expected_target is None or expected_backup is None:
                 raise ValueError("explicit selection save requires confirmed target snapshots")
             target = self.selection_store.save_to(
-                target, self.selection_document(), source_path=Path(self.reader.path),
+                target, self.selection_document(scope=scope), source_path=Path(self.reader.path),
                 expected_target=expected_target, expected_backup=expected_backup,
             )
         self.selection_path = target
         self.selection_dirty = False
-        self._clean_state_signature = self.state_signature()
+        if scope == "process":
+            self.process_saved_signature = self.state_signature(scope="process")
+        else:
+            self.measure_saved_signature = self.state_signature(scope="measure")
+        if self.selection_source_range("process") == self.measure_source_range():
+            self._establish_saved_signatures()
         return target
 
     def load_selection(self, target: Path | None = None) -> SelectionDocument:
@@ -283,6 +357,7 @@ class ViewerSession:
         if document.display.colormap not in plt.colormaps():
             raise ValueError(f"unknown colormap: {document.display.colormap}")
         self._validate_transform(document.transform)
+        document.measurement.validate_bounds(document.transform.crop.width, document.transform.crop.height)
         new_transformer = FrameTransformer(document.transform)
         new_color_limits = ColorLimits(
             vmin=document.display.vmin_c,
@@ -307,23 +382,29 @@ class ViewerSession:
         self._preview_transformer = None
         self._work_time_key = None
         self._work_time_value = None
+        previous = self.measurement.clear()
+        self.measurement.settings = document.measurement
         self.selection_dirty = False
-        self._clean_state_signature = self.state_signature()
+        self._establish_saved_signatures()
         self.selection_path = Path(path)
+        self.release_measurement_store(previous)
 
-    def state_signature(self) -> str:
+    def _establish_saved_signatures(self) -> None:
+        self.process_saved_signature = self.state_signature(scope="process")
+        self.measure_saved_signature = self.state_signature(scope="measure")
+
+    def state_signature(self, *, scope: str = "process") -> str:
         limits = self.color_limits
         payload = {
-            "source_range": [
-                self.timeline.source_frame_at(self.timeline.pending_start),
-                self.timeline.source_frame_at(self.timeline.pending_end),
-            ],
+            "source_range": self.selection_source_range(scope),
             "color_limits": None
             if limits is None
             else [limits.vmin, limits.vmax],
             "colormap": self.colormap,
             "transform": self.applied_transform.fingerprint,
         }
+        if scope == "measure":
+            payload["measurement"] = self.measurement.settings.to_dict()
         encoded = json.dumps(
             payload, sort_keys=True, separators=(",", ":"), allow_nan=False
         ).encode("utf-8")
@@ -331,8 +412,11 @@ class ViewerSession:
 
     def has_unsaved_changes(self) -> bool:
         return self.selection_dirty or (
-            self._clean_state_signature is not None
-            and self.state_signature() != self._clean_state_signature
+            self.process_saved_signature is not None
+            and self.state_signature(scope="process") != self.process_saved_signature
+        ) or (
+            self.measure_saved_signature is not None
+            and self.state_signature(scope="measure") != self.measure_saved_signature
         )
 
     def export_request(self, clip_name: str, clips_root: Path) -> ExportRequest:
@@ -363,12 +447,21 @@ class ViewerModeState:
     editing_transform: bool = False
 
 
+@dataclass
+class ViewerAnalysisState:
+    job: Any | None = None
+    request: AnalysisRequest | None = None
+    timer: Any | None = None
+    closed: bool = False
+
+
 @dataclass(frozen=True)
 class ViewerUI:
     figure: Figure
     axes: Axes
     image: AxesImage
     slider: Slider
+    current_frame_box: TextBox
     range_slider: RangeSlider
     start_box: TextBox
     end_box: TextBox
@@ -393,6 +486,17 @@ class ViewerUI:
     session: ViewerSession
     message_details: dict[str, str]
     size_warning_text: Text
+    process_button: Button
+    measure_button: Button
+    pages: PageCoordinator
+    measure_panel: MeasurePanel
+    analysis_state: ViewerAnalysisState
+    poll_analysis: Callable[[], None]
+    shutdown_analysis: Callable[..., None]
+
+    @property
+    def analysis_job(self):
+        return self.analysis_state.job
 
 
 def transform_status(transform: FrameTransform, dirty: bool) -> str:
@@ -419,7 +523,10 @@ def launch_viewer(
             ui.message_details["startup"] = message
             ui.error_text.set_text(message)
             print(message)
-        plt.show()
+        try:
+            plt.show()
+        finally:
+            ui.shutdown_analysis(wait=True)
 
 
 def build_viewer(
@@ -428,8 +535,10 @@ def build_viewer(
     clips_root: Path | None = None,
     export_job_factory: Callable[[ExportRequest], Any] = ExportJob,
     dialogs: SelectionDialogs | None = None,
+    analysis_job_factory: Callable[[AnalysisRequest], Any] = AnalysisJob,
 ) -> ViewerUI:
     frame = session.frame_at_local(initial_frame)
+    current_frame = frame
     limits = session.color_limits
     if limits is None:
         raise RuntimeError("viewer color limits were not initialized")
@@ -438,7 +547,7 @@ def build_viewer(
     figure, axes = plt.subplots(figsize=(12, 10))
     if dialogs is None:
         dialogs = SelectionDialogs(getattr(figure.canvas.manager, "window", None))
-    figure.subplots_adjust(bottom=0.56, right=0.87)
+    figure.subplots_adjust(bottom=0.56, right=0.87, top=0.90)
     image = axes.imshow(
         frame.temperature_c,
         cmap=session.colormap,
@@ -448,6 +557,17 @@ def build_viewer(
     )
     colorbar = figure.colorbar(image, ax=axes)
     colorbar.set_label("Temperature (°C)")
+    process_image_rect = axes.get_position(original=True).frozen()
+    process_colorbar_rect = colorbar.ax.get_position(original=True).frozen()
+    process_button = Button(figure.add_axes(NAV_RECTS["process"]), "Process")
+    measure_button = Button(figure.add_axes(NAV_RECTS["measure"]), "Measure")
+    page_title = figure.text(.39, .972, "", fontsize=9, va="center", parse_math=False)
+    measure_placeholder = figure.add_axes(MEASURE_RESULT_RECT)
+    measure_delta_axes = figure.add_axes(MEASURE_CURVE_DELTA_RECT)
+    measure_delta_axes.set_visible(False)
+    measure_placeholder.set_axis_off()
+    measure_placeholder.text(.5, .5, "Measurement uses the confirmed work range",
+                             ha="center", va="center", transform=measure_placeholder.transAxes)
     axes.set_xlabel("x (pixel)")
     axes.set_ylabel("y (pixel)")
     _set_frame_title(
@@ -490,6 +610,11 @@ def build_viewer(
         valfmt="%0.0f",
     )
     start_box = TextBox(start_axes, "Start frame", initial="0")
+    current_frame_box = TextBox(figure.add_axes((.64, .535, .05, .025)), "Frame", initial=str(initial_frame))
+    label_above(current_frame_box)
+    current_frame_box.label.set_fontsize(8)
+    current_frame_box.text_disp.set_clip_on(True)
+    current_frame_box.text_disp.set_clip_path(current_frame_box.ax.patch)
     end_box = TextBox(
         end_axes,
         "End frame",
@@ -511,14 +636,16 @@ def build_viewer(
     status_text = BoundedMessage(figure, "timeline", message_details, max_lines=2)
     error_text = BoundedMessage(figure, "message", message_details, max_lines=2, color="crimson")
     size_warning_text = figure.text(
-        0.5, 0.98, "Enlarge window to at least 1000 x 800 logical pixels",
+        0.5, 0.945, "Enlarge window to at least 1000 x 800 logical pixels",
         ha="center", va="top", fontsize=9, color="crimson", visible=False,
     )
     details_notice = figure.text(0.15, 0.016, "", fontsize=7, va="top")
     export_state = ViewerExportState()
     mode_state = ViewerModeState()
+    analysis_state = ViewerAnalysisState()
     updating = False
     transform_editor: TransformEditorUI
+    pages: PageCoordinator
 
     normal_control_axes = (
         range_axes,
@@ -533,6 +660,12 @@ def build_viewer(
         export_axes,
         cancel_axes,
     )
+
+    def process_input_available() -> bool:
+        if pages.current != "process" or pages.busy is not None:
+            set_error("Process controls are unavailable on this page or during a task")
+            return False
+        return True
 
     def set_error(message: str = "", *, error: bool = True) -> None:
         details_notice.set_text("")
@@ -588,7 +721,7 @@ def build_viewer(
         sync_slider: bool = True,
         preview_transform: FrameTransform | None = None,
     ) -> None:
-        nonlocal updating
+        nonlocal updating, current_frame
         if mode_state.editing_transform:
             session.timeline.set_current(local_frame)
             source_frame = session.timeline.source_frame_at(local_frame)
@@ -607,6 +740,11 @@ def build_viewer(
             next_frame = session.frame_at_local(local_frame)
             image.set_cmap(session.colormap)
             set_image_array(next_frame.temperature_c)
+        current_frame = next_frame
+        if pages.current == "measure":
+            measure_panel.current_local_frame = local_frame
+            measure_panel.frame_count = session.timeline.local_num_frames
+            measure_panel.refresh_frame(next_frame)
         _set_frame_title(
             axes,
             next_frame,
@@ -616,6 +754,11 @@ def build_viewer(
         )
         refresh_status(next_frame)
         refresh_transform_status()
+        updating = True
+        try:
+            current_frame_box.set_val(str(local_frame))
+        finally:
+            updating = False
         if sync_slider:
             updating = True
             try:
@@ -633,6 +776,7 @@ def build_viewer(
             set_widget_domain(slider, local_max)
             set_widget_domain(range_slider, local_max)
             slider.set_val(session.timeline.current_local_frame)
+            current_frame_box.set_val(str(session.timeline.current_local_frame))
             range_slider.set_val(session.timeline.pending_range)
             start_box.set_val(str(session.timeline.pending_start))
             end_box.set_val(str(session.timeline.pending_end))
@@ -642,20 +786,40 @@ def build_viewer(
             slider.ax.set_visible(True)
             range_slider.set_active(False)
             range_slider.ax.set_visible(False)
+        pages.refresh()
 
     def mark_selection_dirty() -> None:
         session.selection_dirty = True
         refresh_transform_status()
 
     def on_current(value: float) -> None:
-        if not updating:
+        if not updating and pages.busy is None:
             show_local(int(round(value)), sync_slider=False)
+
+    def on_current_frame_submit(text):
+        nonlocal updating
+        if updating or pages.current != "measure" or pages.busy is not None or mode_state.editing_transform:
+            return
+        try:
+            value = int(text.strip())
+            if not 0 <= value < session.timeline.local_num_frames:
+                raise ValueError("Frame is outside the confirmed range")
+            show_local(value)
+        except (ValueError, OSError, RuntimeError) as exc:
+            updating = True
+            try:
+                current_frame_box.set_val(str(session.timeline.current_local_frame))
+            finally:
+                updating = False
+            set_error(str(exc))
 
     def on_range(values: tuple[float, float]) -> None:
         if updating:
             return
         if mode_state.editing_transform:
             set_error("Cannot change the frame range while editing transform")
+            return
+        if not process_input_available():
             return
         old_start, old_end = session.timeline.pending_range
         new_start, new_end = int(round(values[0])), int(round(values[1]))
@@ -678,6 +842,8 @@ def build_viewer(
             return
         if mode_state.editing_transform:
             set_error("Cannot change the frame range while editing transform")
+            return
+        if not process_input_available():
             return
         before = session.timeline.pending_range
         try:
@@ -702,7 +868,9 @@ def build_viewer(
         if mode_state.editing_transform:
             set_error("Cannot confirm the frame range while editing transform")
             return
-        if session.timeline.confirm_range():
+        if not process_input_available():
+            return
+        if session.confirm_range():
             invalidate_export_confirmation()
             mark_selection_dirty()
             sync_all_controls()
@@ -712,23 +880,31 @@ def build_viewer(
         if mode_state.editing_transform:
             set_error("Cannot reset the frame range while editing transform")
             return
+        if not process_input_available():
+            return
         before = session.state_signature()
-        session.timeline.reset_full()
+        session.reset_full()
         invalidate_export_confirmation()
         if session.state_signature() != before:
             mark_selection_dirty()
         sync_all_controls()
         show_local(0)
 
-    def on_save(_event: Any) -> None:
+    def on_save(_event: Any = None, *, scope="process") -> None:
         if mode_state.editing_transform:
             set_error("Cannot save a selection while editing transform")
             return
+        if scope == "process" and not process_input_available():
+            return
+        if scope == "measure" and (pages.current != "measure" or pages.busy is not None):
+            return
         target = None
         try:
+            options = {} if scope == "process" else {"title": f"Save setup: confirmed source {session.measure_source_range()}"}
             target = dialogs.choose_save(
                 session.selection_store.root,
                 session.selection_store.path_for(Path(session.reader.path)).name,
+                **options,
             )
             if target is None:
                 return
@@ -736,8 +912,10 @@ def build_viewer(
             expected_backup = TargetSnapshot.capture(target.with_name(target.name + ".bak"))
             if expected_target.exists and not dialogs.confirm(f"Overwrite selection?\n{target}"):
                 return
+            scope_options = {} if scope == "process" else {"scope": "measure"}
             target = session.save_selection(
                 target, expected_target=expected_target, expected_backup=expected_backup,
+                **scope_options,
             )
         except (OSError, ValueError, RuntimeError) as exc:
             set_error(f"Save selection failed: {exc}" + (f"\nFile: {target}" if target is not None else ""))
@@ -749,6 +927,8 @@ def build_viewer(
         if mode_state.editing_transform:
             set_error("Cannot load a selection while editing transform")
             return
+        if not process_input_available():
+            return
         target = None
         try:
             target = dialogs.choose_load(session.selection_store.root)
@@ -757,11 +937,12 @@ def build_viewer(
             document = session.selection_store.load_path(target, session.source_identity())
             session._prepare_selection(document)
             if session.has_unsaved_changes() and not dialogs.confirm(
-                "Replace unsaved range, color scale, colormap, and transform?\n"
+                "Replace unsaved range, color scale, colormap, and transform? (Includes ROI setup.)\n"
                 f"Load: {target}"
             ):
                 return
             session.apply_selection_document(document, path=target)
+            measure_panel.clear_current_analysis()
         except (OSError, ValueError, RuntimeError) as exc:
             set_error(f"Load selection failed: {exc}" + (f"\nFile: {target}" if target is not None else ""))
             return
@@ -800,6 +981,7 @@ def build_viewer(
         cancel_button.set_active(False)
         export_text.set_visible(visible)
         progress_text.set_visible(visible)
+        pages.refresh()
 
     def leave_transform_mode(*, refresh: bool = True) -> None:
         mode_state.editing_transform = False
@@ -823,6 +1005,10 @@ def build_viewer(
     def on_apply_transform(_transform: FrameTransform) -> None:
         try:
             transform = transform_editor.draft.build()
+            if transform != session.applied_transform and session.measurement.settings.rois:
+                count = len(session.measurement.settings.rois)
+                if not dialogs.confirm(f"Apply changed transform and clear {count} ROI(s) and measurement results?"):
+                    return
             source_frame = session.timeline.source_frame_at(
                 session.timeline.current_local_frame
             )
@@ -841,6 +1027,8 @@ def build_viewer(
     def on_edit_transform(_event: Any) -> None:
         if mode_state.editing_transform:
             set_error("Transform editing is already active")
+            return
+        if not process_input_available():
             return
         job = export_state.job
         if job is not None and job.is_alive():
@@ -869,6 +1057,7 @@ def build_viewer(
         clip_name_box.set_active(active)
         export_button.set_active(active)
         cancel_button.set_active(not active)
+        pages.set_busy(None if active else "native_export")
 
     def current_confirmation() -> ExportConfirmation:
         request = session.export_request(clip_name_box.text, Path(clips_root))
@@ -883,6 +1072,8 @@ def build_viewer(
     def on_export(_event: Any) -> None:
         if mode_state.editing_transform:
             set_error("Cannot export while editing transform")
+            return
+        if not process_input_available():
             return
         if export_state.job is not None and export_state.job.is_alive():
             return
@@ -936,6 +1127,8 @@ def build_viewer(
         figure.canvas.draw_idle()
 
     def poll_export() -> None:
+        if pages.busy in ("analysis", "analysis_export"):
+            return
         job = export_state.job
         if job is None:
             return
@@ -968,10 +1161,131 @@ def build_viewer(
         figure.canvas.draw_idle()
 
     def on_close(_event: Any) -> None:
+        shutdown_analysis(wait=False)
+        pages.dispose()
+        measure_panel.dispose()
         job = export_state.job
         if job is not None and job.is_alive():
             job.cancel()
             job.join(timeout=0.25)
+
+    def restore_analysis_status(current_key, *, fallback):
+        state = session.measurement
+        if state.result_store is not None and state.result_key == current_key:
+            state.status = "complete"
+        else:
+            state.status = "stale" if state.result_store is not None else fallback
+
+    def on_calculate():
+        if (pages.current != "measure" or pages.busy is not None or mode_state.editing_transform
+                or measure_panel.adding or not session.measurement.settings.rois or analysis_state.closed):
+            return
+        try:
+            source = session.source_identity()
+            start, end = session.measure_source_range()
+            key = AnalysisKey.from_inputs(source, start, end, session.applied_transform, session.measurement.settings.rois)
+            request = AnalysisRequest(Path(session.reader.path), source, start, end, session.applied_transform,
+                                      session.measurement.settings.rois, key)
+            job = analysis_job_factory(request)
+        except Exception as exc:
+            set_error(f"Analysis could not start: {exc}")
+            return
+        analysis_state.request, analysis_state.job = request, job
+        session.measurement.status = "running"
+        measure_panel.set_busy(True)
+        pages.set_busy("analysis")
+        progress_text.set_visible(True)
+        try:
+            job.start()
+        except Exception as exc:
+            analysis_state.job = None
+            restore_analysis_status(key, fallback="failed")
+            pages.set_busy(None)
+            sync_all_controls()
+            set_error(f"Analysis start failed: {exc}")
+            return
+        analysis_state.timer.start()
+        poll_analysis()
+
+    def on_cancel_analysis():
+        job = analysis_state.job
+        if pages.busy == "analysis" and job is not None and job.is_alive():
+            job.cancel()
+            progress_text.set_text("Cancelling analysis; waiting for the current SDK call")
+            figure.canvas.draw_idle()
+
+    def poll_analysis():
+        job = analysis_state.job
+        if job is None or analysis_state.closed:
+            return
+        snapshot = job.progress.snapshot()
+        progress_text.set_text(f"Analysis: {snapshot.completed}/{snapshot.total} | {snapshot.message}")
+        if job.is_alive():
+            measure_panel.cancel_button.set_active(True)
+            figure.canvas.draw_idle()
+            return
+        analysis_state.timer.stop()
+        outcome = job.outcome
+        state = session.measurement
+        current_key = None
+        error = None
+        try:
+            # This is intentionally after is_alive() is false: never read the UI
+            # SDK reader while the worker still owns its independent reader.
+            current_key = session.analysis_key()
+        except Exception as exc:
+            error = str(exc)
+        candidate = None if outcome is None else outcome.store
+        valid = outcome is not None and outcome.status == "complete" and outcome.key == current_key
+        if valid:
+            try:
+                valid = candidate.key_json == current_key.to_json()
+            except Exception as exc:
+                valid, error = False, str(exc)
+        if valid:
+            previous = state.result_store
+            state.result_store, state.result_key, state.status = candidate, outcome.key, "complete"
+            if previous is not candidate:
+                session.release_measurement_store(previous)
+            progress_text.set_text(f"Analysis complete: {snapshot.total} frames")
+            set_error("Analysis complete", error=False)
+        else:
+            if candidate is not None:
+                session.release_measurement_store(candidate)
+            fallback = "failed" if outcome is None or outcome.status == "complete" else outcome.status
+            restore_analysis_status(current_key, fallback=fallback)
+            error = error or ("Worker ended without an outcome" if outcome is None else outcome.error)
+            if outcome is not None and outcome.status == "complete":
+                error = error or "Analysis inputs changed before publication"
+            set_error(error or "Analysis cancelled", error=fallback != "cancelled")
+        if outcome is not None:
+            session.release_measurement_store(outcome.cleanup_store)
+        analysis_state.job = None
+        analysis_state.request = None
+        pages.set_busy(None)
+        sync_all_controls()
+        if session.measurement_cleanup_error:
+            set_error(f"Result cleanup pending: {session.measurement_cleanup_error}")
+        figure.canvas.draw_idle()
+
+    def shutdown_analysis(*, wait=False):
+        analysis_state.closed = True
+        if analysis_state.timer is not None:
+            analysis_state.timer.stop()
+        job = analysis_state.job
+        if job is not None:
+            if job.is_alive():
+                job.cancel()
+            if wait:
+                job.join()
+            if job.is_alive():
+                return
+            outcome = job.outcome
+            if outcome is not None:
+                if outcome.store is not session.measurement.result_store:
+                    session.release_measurement_store(outcome.store)
+                session.release_measurement_store(outcome.cleanup_store)
+        session.cleanup_measurement_results()
 
     def on_resize(_event: Any) -> None:
         width, height = figure.get_size_inches()
@@ -981,6 +1295,7 @@ def build_viewer(
     def on_key(event: Any) -> None:
         if event.key != "f1":
             return
+        message_details["ROIs"] = "\n".join(f"{roi.id}: {roi.name}" for roi in session.measurement.settings.rois)
         hidden = {"export", "progress"} if mode_state.editing_transform else {"editor_error", "editor_status"}
         details = "\n".join(
             f"{key}: {value}" for key, value in message_details.items()
@@ -1007,7 +1322,134 @@ def build_viewer(
     )
     transform_editor.set_visible(False)
 
+    def on_roi_geometry_change():
+        session.measurement.invalidate()
+        refresh_transform_status()
+
+    measure_panel = build_measure_panel(figure, axes, session.measurement,
+                                        on_roi_geometry_change, refresh_transform_status, dialogs)
+    measure_panel.set_visible(False)
+    measure_panel.set_result_axes(measure_placeholder, measure_delta_axes)
+    measure_panel.on_calculate = on_calculate
+    measure_panel.on_cancel = on_cancel_analysis
+    measure_panel.on_save_setup = lambda: on_save(scope="measure")
+
+    def can_export_analysis():
+        # Availability never touches the SDK reader: analysis owns it while busy.
+        if pages.busy is not None or measure_panel.adding:
+            return False
+        state = session.measurement
+        if state.settings.result_view == "current":
+            return measure_panel.current_analysis is not None
+        key = state.result_key
+        return (any(roi.checked for roi in state.settings.rois) and key is not None and state.is_current(key)
+                and (key.source_start, key.source_end) == session.measure_source_range()
+                and key.transform_fingerprint == session.applied_transform.fingerprint
+                and key.roi_geometry == tuple(sorted((roi.id, roi.x, roi.y, roi.width, roi.height)
+                                                      for roi in state.settings.rois)))
+
+    def on_analysis_export(kind):
+        if pages.current != "measure" or not can_export_analysis():
+            return
+        target = None
+        try:
+            identity = session.source_identity()
+            state = session.measurement
+            if state.settings.result_view == "curves" and not state.is_current(session.analysis_key()):
+                raise ValueError("Analysis inputs changed; Calculate again")
+            limits = session.color_limits
+            snapshot = AnalysisExportSnapshot(
+                identity, Path(session.reader.path), session.measure_source_range(), session.work_timestamps()[0],
+                json.dumps(transform_to_dict(session.applied_transform), allow_nan=False),
+                DisplaySettings(session.colormap, limits.vmin, limits.vmax), state.settings,
+                current_frame.frame_index, session.timeline.current_local_frame, current_frame.timestamp,
+                current_frame.temperature_c, measure_panel.current_analysis, state.result_path)
+            measure_panel.set_busy(True)
+            pages.set_busy("analysis_export")
+            target = dialogs.choose_analysis_export(kind, WORKSPACE_ROOT / "analysis",
+                        f"{Path(session.reader.path).stem}-{snapshot.source_range[0]}-{snapshot.source_range[1]}.{kind}")
+            if target is None:
+                return
+            expected = TargetSnapshot.capture(target)
+            if expected.exists and not dialogs.confirm(f"Overwrite {kind.upper()}?\n{target}"):
+                return
+            writer = export_csv if kind == "csv" else export_png
+            writer(target, snapshot, expected=expected, raw_root=session.selection_store.raw_root)
+            set_error(f"Exported {kind.upper()}: {target}", error=False)
+        except (OSError, ValueError, RuntimeError) as exc:
+            set_error(f"Analysis export failed: {exc}" + (f"\nFile: {target}" if target is not None else ""))
+        finally:
+            if pages.busy == "analysis_export":
+                pages.set_busy(None)
+                sync_all_controls()
+
+    measure_panel.can_export = can_export_analysis
+    measure_panel.on_export = on_analysis_export
+
+    process_widgets = (range_slider, start_box, end_box, confirm_button, reset_button,
+                       save_button, load_button, edit_transform_button, clip_name_box,
+                       export_button, cancel_button)
+    def process_availability(widget) -> bool:
+        if mode_state.editing_transform:
+            return False
+        if widget is range_slider:
+            return session.timeline.local_num_frames > 1
+        if widget is cancel_button:
+            return False
+        return True
+
+    pages = PageCoordinator(figure.canvas, {
+        "process": PageGroup(normal_control_axes, process_widgets, texts=(export_text,),
+                             available=process_availability,
+                             available_during_busy=lambda widget, kind: (
+                                 widget is cancel_button and kind == "native_export"
+                                 and export_state.job is not None and export_state.job.is_alive()
+                                 and export_state.job.progress.snapshot().cancel_allowed)),
+        "measure": PageGroup((measure_placeholder, measure_delta_axes, current_frame_box.ax),
+                             (current_frame_box,), available=lambda widget: session.timeline.local_num_frames > 1,
+                             on_visibility=measure_panel.set_visible),
+    }, editing_transform=lambda: mode_state.editing_transform, on_error=set_error)
+
+    def refresh_page(page: str) -> None:
+        measure = page == "measure"
+        measure_panel.set_busy(pages.busy is not None)
+        measure_panel.cancel_button.set_active(pages.busy == "analysis" and analysis_state.job is not None
+                                              and analysis_state.job.is_alive())
+        measure_panel.current_local_frame = session.timeline.current_local_frame
+        measure_panel.frame_count = session.timeline.local_num_frames
+        if measure and pages.busy is None:
+            message_details["ROIs"] = "\n".join(f"{roi.id}: {roi.name}" for roi in session.measurement.settings.rois)
+            measure_panel.resampled = session.applied_transform.rotation.angle_deg % 90 != 0
+            measure_panel.refresh_frame(current_frame)
+        axes.set_position(MEASURE_IMAGE_RECT if measure else process_image_rect)
+        colorbar.ax.set_position(MEASURE_COLORBAR_RECT if measure else process_colorbar_rect)
+        slider.ax.set_position(MEASURE_CURRENT_RECT if measure else NORMAL_RECTS["current"])
+        slider.valtext.set_visible(not measure)
+        axes.title.set_fontsize(9 if measure else 12)
+        slider.set_active(pages.busy is None and session.timeline.local_num_frames > 1)
+        slider.ax.set_visible(session.timeline.local_num_frames > 1 or mode_state.editing_transform)
+        range_slider.ax.set_visible(not measure and not mode_state.editing_transform
+                                    and session.timeline.local_num_frames > 1)
+        if mode_state.editing_transform:
+            for control_axis in normal_control_axes:
+                control_axis.set_visible(False)
+            export_text.set_visible(False)
+            progress_text.set_visible(False)
+        nav_active = pages.busy is None and not mode_state.editing_transform
+        process_button.set_active(nav_active)
+        measure_button.set_active(nav_active)
+        process_button.label.set_weight("bold" if not measure else "normal")
+        measure_button.label.set_weight("bold" if measure else "normal")
+        source_name = Path(getattr(session.reader, "path", "SEQ")).name
+        page_title.set_text(f"{source_name[:38]} | work {session.timeline.source_start}–{session.timeline.source_end}")
+        if measure and session.selection_source_range("process") != session.measure_source_range():
+            set_error("Using confirmed range; the Process candidate range is not applied", error=False)
+    pages.on_refresh = refresh_page
+    process_button.on_clicked(lambda event: pages.switch("process"))
+    measure_button.on_clicked(lambda event: pages.switch("measure"))
+
     slider.on_changed(on_current)
+    current_frame_box.on_submit(on_current_frame_submit)
     range_slider.on_changed(on_range)
     start_box.on_submit(lambda text: submit_endpoint(text, "start"))
     end_box.on_submit(lambda text: submit_endpoint(text, "end"))
@@ -1020,6 +1462,8 @@ def build_viewer(
         if mode_state.editing_transform:
             set_error("Cannot change export settings while editing transform")
             return
+        if not process_input_available():
+            return
         invalidate_export_confirmation()
 
     clip_name_box.on_submit(on_clip_name_submit)
@@ -1030,6 +1474,8 @@ def build_viewer(
     figure.canvas.mpl_connect("key_press_event", on_key)
     export_state.timer = figure.canvas.new_timer(interval=100)
     export_state.timer.add_callback(poll_export)
+    analysis_state.timer = figure.canvas.new_timer(interval=100)
+    analysis_state.timer.add_callback(poll_analysis)
     sync_all_controls()
     show_local(initial_frame)
 
@@ -1038,6 +1484,7 @@ def build_viewer(
         axes=axes,
         image=image,
         slider=slider,
+        current_frame_box=current_frame_box,
         range_slider=range_slider,
         start_box=start_box,
         end_box=end_box,
@@ -1062,6 +1509,13 @@ def build_viewer(
         session=session,
         message_details=message_details,
         size_warning_text=size_warning_text,
+        process_button=process_button,
+        measure_button=measure_button,
+        pages=pages,
+        measure_panel=measure_panel,
+        analysis_state=analysis_state,
+        poll_analysis=poll_analysis,
+        shutdown_analysis=shutdown_analysis,
     )
 
 

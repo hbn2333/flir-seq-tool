@@ -6,6 +6,7 @@ import pytest
 
 from flir_seq_tool.selection import SourceIdentity, DisplaySettings, build_selection_document
 from flir_seq_tool.transform import FrameTransform
+from flir_seq_tool.measurement_models import MeasurementSettings, Roi
 
 
 START = datetime(2026, 8, 28, 9)
@@ -50,7 +51,8 @@ def test_clip_document_uses_child_identity_and_preserves_view(tmp_path, count, a
     from flir_seq_tool.export_bundle import build_clip_document
     source = tmp_path / "source.seq"
     source.write_bytes(b"source")
-    view = view_document(source, count, angle)
+    view = replace(view_document(source, count, angle), measurement=MeasurementSettings(
+        (Roi("r1", "ROI 1", 1, 2, 3, 4, "#1f77b4", True),), "r1"))
     partial = tmp_path / "unique.partial.seq"
     partial.write_bytes(b"child")
     target = tmp_path / "clip.seq"
@@ -65,6 +67,7 @@ def test_clip_document_uses_child_identity_and_preserves_view(tmp_path, count, a
     assert child.selection.end_timestamp == view.selection.end_timestamp
     assert child.transform == view.transform
     assert child.display == view.display
+    assert child.measurement == view.measurement
 
 
 @pytest.mark.parametrize("field,value", [("width", 19), ("num_frames", 4), ("start", START)])

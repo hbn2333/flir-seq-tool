@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import gc
 import json
 import weakref
+from dataclasses import replace
 
 import matplotlib
 
@@ -20,6 +21,7 @@ from flir_seq_tool.extraction import (
     ExportStatus,
 )
 from flir_seq_tool.models import TemperatureFrame
+from flir_seq_tool.measurement_models import MeasurementSettings, Roi
 from flir_seq_tool.selection import DisplaySettings, SelectionStore
 from flir_seq_tool.transform import CropRect, FrameTransform, RotationSettings
 from flir_seq_tool import viewer
@@ -60,7 +62,7 @@ class FakeSelectionDialogs:
         self.details = []
         self.choices = []
 
-    def choose_save(self, initial_dir, suggested_name):
+    def choose_save(self, initial_dir, suggested_name, **kwargs):
         self.choices.append(("save", initial_dir, suggested_name))
         return self.save
 
@@ -68,12 +70,281 @@ class FakeSelectionDialogs:
         self.choices.append(("load", initial_dir))
         return self.load
 
+    def choose_analysis_export(self, kind, initial_dir, suggested_name):
+        self.choices.append((kind, initial_dir, suggested_name))
+        return None
+
     def confirm(self, message):
         self.confirmations.append(message)
         return self.answer
 
     def show_details(self, message):
         self.details.append(message)
+
+
+def test_measure_scope_ignores_pending_range():
+    session = ViewerSession(FakeTemperatureReader(make_frames(5)))
+    session.timeline.set_pending(1, 3)
+    assert session.measure_source_range() == (0, 4)
+    session.confirm_range()
+    assert session.measure_source_range() == (1, 3)
+
+
+def test_measure_save_does_not_erase_unsaved_pending_range(tmp_path):
+    session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / "s.seq"),
+                            selection_store=SelectionStore(tmp_path / "configs"))
+    session.frame_at(0)
+    assert not session.has_unsaved_changes()
+    session.timeline.set_pending(1, 3)
+    assert session.selection_document(scope="measure").selection.frame_count == 5
+    assert session.selection_document(scope="process").selection.frame_count == 3
+    session.save_selection(scope="measure")
+    assert session.has_unsaved_changes()
+    assert session.measure_saved_signature == session.state_signature(scope="measure")
+    assert session.process_saved_signature != session.state_signature(scope="process")
+
+
+def test_roi_edits_are_dirty_before_any_save_and_browsing_is_not(tmp_path):
+    session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / "s.seq"))
+    session.frame_at(0)
+    session.frame_at_local(3)
+    assert not session.has_unsaved_changes()
+    session.measurement.settings = MeasurementSettings((Roi("r1", "ROI 1", 0, 0, 2, 1, "#123456", True),), "r1")
+    assert session.has_unsaved_changes()
+
+
+@pytest.mark.parametrize("scope", ["measure", "process"])
+def test_save_scope_io_and_clean_baselines_with_equal_ranges(tmp_path, scope):
+    session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / "s.seq"),
+                            selection_store=SelectionStore(tmp_path / "configs"))
+    session.frame_at(0)
+    settings = MeasurementSettings((Roi("r1", "ROI 1", 0, 0, 2, 1, "#123456", True),), "r1")
+    session.measurement.settings = settings
+    path = session.save_selection(scope=scope)
+    assert not session.has_unsaved_changes()
+    assert SelectionStore(tmp_path).load_path(path).measurement == settings
+    session.measurement.settings = MeasurementSettings()
+    session.load_selection(path)
+    assert session.measurement.settings == settings
+    assert session.measurement.status == "empty"
+    assert not session.has_unsaved_changes()
+
+
+def test_process_save_pending_scope_does_not_mark_measure_changes_saved(tmp_path):
+    session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / "s.seq"),
+                            selection_store=SelectionStore(tmp_path / "configs"))
+    session.frame_at(0)
+    session.timeline.set_pending(1, 3)
+    session.measurement.settings = MeasurementSettings((Roi("r1", "ROI 1", 0, 0, 2, 1, "#123456", True),))
+    session.save_selection()
+    assert session.has_unsaved_changes()
+    assert session.process_saved_signature == session.state_signature(scope="process")
+    assert session.measure_saved_signature != session.state_signature(scope="measure")
+
+
+def test_confirm_and_reset_invalidate_only_actual_work_range_changes():
+    session = ViewerSession(FakeTemperatureReader(make_frames(5)))
+    session.measurement.status = "complete"
+    session.timeline.set_pending(1, 3)
+    assert session.measurement.status == "complete"
+    assert session.confirm_range()
+    assert session.measurement.status == "stale"
+    session.measurement.status = "complete"
+    assert not session.confirm_range()
+    assert session.measurement.status == "complete"
+    session.reset_full()
+    assert session.measurement.status == "stale"
+    session.measurement.status = "complete"
+    session.reset_full()
+    assert session.measurement.status == "complete"
+
+
+def test_unknown_save_scope_is_rejected_before_writing(tmp_path):
+    session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / "s.seq"))
+    session.frame_at(0)
+    with pytest.raises(ValueError, match="scope"):
+        session.selection_document(scope="bad")
+
+
+def measurement_settings():
+    return MeasurementSettings((Roi("r1", "ROI 1", 0, 0, 2, 1, "#123456", True),), "r1")
+
+
+def test_measure_page_disables_process_range_input():
+    ui = build_viewer(ViewerSession(FakeTemperatureReader(make_frames(5))))
+    try:
+        _drag_control(ui, ui.measure_button, .5, .5)
+        assert ui.pages.current == "measure"
+        assert not ui.range_slider.active
+        assert not ui.range_slider.ax.get_visible()
+        before = ui.session.timeline.pending_range
+        ui.range_slider.set_val((1, 3))
+        assert ui.session.timeline.pending_range == before
+        _drag_control(ui, ui.process_button, .5, .5)
+        assert ui.pages.current == "process"
+        assert ui.range_slider.active
+        assert ui.figure.canvas.mouse_grabber is None
+    finally:
+        plt.close(ui.figure)
+
+
+def test_page_switch_does_not_accumulate_callbacks_or_change_frame():
+    ui = build_viewer(ViewerSession(FakeTemperatureReader(make_frames(5))))
+    try:
+        ui.slider.set_val(2)
+        counts = {kind: len(callbacks) for kind, callbacks in ui.figure.canvas.callbacks.callbacks.items()}
+        for _ in range(20):
+            assert ui.pages.switch("measure")
+            assert ui.pages.switch("process")
+        assert counts == {kind: len(callbacks) for kind, callbacks in ui.figure.canvas.callbacks.callbacks.items()}
+        assert ui.session.timeline.current_local_frame == 2
+        ui.edit_transform_button._observers.process("clicked", None)
+        assert not ui.pages.switch("measure")
+        assert not ui.measure_button.active
+    finally:
+        plt.close(ui.figure)
+
+
+def test_single_frame_slider_remains_disabled_after_page_return():
+    ui = build_viewer(ViewerSession(FakeTemperatureReader(make_frames(1))))
+    try:
+        ui.pages.switch("measure")
+        assert not ui.slider.active
+        ui.pages.switch("process")
+        assert not ui.slider.active
+        assert not ui.range_slider.active
+    finally:
+        plt.close(ui.figure)
+
+
+def test_native_cancel_is_clickable_after_busy_page_refresh(tmp_path):
+    session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / "s.seq"))
+    jobs = []
+    ui = build_viewer(session, clips_root=tmp_path / "clips",
+                      export_job_factory=lambda request: jobs.append(FakeExportJob(request)) or jobs[-1])
+    try:
+        ui.clip_name_box.set_val("clip")
+        _drag_control(ui, ui.export_button, .5, .5)
+        _drag_control(ui, ui.export_button, .5, .5)
+        ui.pages.refresh()
+        assert ui.cancel_button.active
+        _drag_control(ui, ui.cancel_button, .5, .5)
+        assert jobs[0].cancelled
+        jobs[0].progress.update(cancel_allowed=False)
+        ui.pages.refresh()
+        assert not ui.cancel_button.active
+    finally:
+        plt.close(ui.figure)
+
+
+def test_same_transform_and_cancel_keep_measurement_but_changed_transform_clears():
+    session = ViewerSession(FakeTemperatureReader(make_frames(5)))
+    session.measurement.settings = measurement_settings()
+    session.measurement.status = "complete"
+    session.apply_transform(session.applied_transform)
+    assert session.measurement.settings == measurement_settings()
+    assert session.measurement.status == "complete"
+    session.apply_transform(cropped_transform())
+    assert session.measurement.settings == MeasurementSettings()
+    assert session.measurement.status == "empty"
+
+
+@pytest.mark.parametrize("accept", [False, True])
+def test_transform_change_requires_roi_count_confirmation_and_preserves_rejected_draft(accept):
+    session = ViewerSession(FakeTemperatureReader(make_frames(5)))
+    session.measurement.settings = measurement_settings()
+    dialogs = FakeSelectionDialogs(answer=accept)
+    ui = build_viewer(session, dialogs=dialogs)
+    try:
+        ui.edit_transform_button._observers.process("clicked", None)
+        ui.transform_editor.set_angle(10.)
+        ui.transform_editor.apply_button._observers.process("clicked", None)
+        assert "1 ROI" in dialogs.confirmations[-1]
+        if accept:
+            assert session.measurement.settings == MeasurementSettings()
+            assert session.applied_transform.rotation.angle_deg == 10.
+            assert not ui.mode_state.editing_transform
+        else:
+            assert session.measurement.settings == measurement_settings()
+            assert session.applied_transform.rotation.angle_deg == 0.
+            assert ui.mode_state.editing_transform
+            assert ui.transform_editor.draft.build().rotation.angle_deg == 10.
+            ui.transform_editor.cancel_button._observers.process("clicked", None)
+            assert session.measurement.settings == measurement_settings()
+    finally:
+        plt.close(ui.figure)
+
+
+def test_invalid_measurement_load_is_atomic_and_valid_load_replaces_settings(tmp_path):
+    session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / "s.seq"),
+                            selection_store=SelectionStore(tmp_path / "configs"))
+    session.frame_at(0)
+    session.measurement.settings = measurement_settings()
+    target = session.save_selection(scope="measure")
+    session.measurement.settings = replace(measurement_settings(), curve_metric="max")
+    session.measurement.status = "complete"
+    before = (session.state_signature(scope="measure"), session.measurement.settings,
+              session.measurement.status, session.process_saved_signature, session.measure_saved_signature)
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    payload["measurement"]["rois"][0]["width"] = 999
+    target.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="bounds"):
+        session.load_selection(target)
+    assert before == (session.state_signature(scope="measure"), session.measurement.settings,
+                      session.measurement.status, session.process_saved_signature, session.measure_saved_signature)
+    payload["measurement"]["rois"][0]["width"] = 2
+    target.write_text(json.dumps(payload), encoding="utf-8")
+    session.load_selection(target)
+    assert session.measurement.settings == measurement_settings()
+    assert session.measurement.status == "empty"
+    assert not session.has_unsaved_changes()
+
+
+def test_measure_save_failure_preserves_both_saved_signatures(tmp_path, monkeypatch):
+    session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / "s.seq"),
+                            selection_store=SelectionStore(tmp_path / "configs"))
+    session.frame_at(0)
+    session.timeline.set_pending(1, 3)
+    session.measurement.settings = measurement_settings()
+    before = (session.process_saved_signature, session.measure_saved_signature)
+    def fail(*args, **kwargs):
+        raise OSError("disk full")
+    monkeypatch.setattr(session.selection_store, "save", fail)
+    with pytest.raises(OSError, match="disk full"):
+        session.save_selection(scope="measure")
+    assert before == (session.process_saved_signature, session.measure_saved_signature)
+    assert session.has_unsaved_changes()
+
+
+@pytest.mark.parametrize("operation", ["load", "transform"])
+def test_old_store_cleanup_failure_keeps_new_state_and_ownership(tmp_path, operation):
+    class Store:
+        fails = True
+        cleaned = False
+        def cleanup(self):
+            if self.fails:
+                raise OSError("busy result")
+            self.cleaned = True
+    session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / "s.seq"),
+                            selection_store=SelectionStore(tmp_path / "configs"))
+    session.frame_at(0)
+    saved = session.save_selection()
+    store = Store()
+    session.measurement.settings = measurement_settings()
+    session.measurement.result_store = store
+    if operation == "load":
+        session.load_selection(saved)
+        assert session.measurement.settings == MeasurementSettings()
+        assert not session.has_unsaved_changes()
+    else:
+        session.apply_transform(cropped_transform())
+        assert session.applied_transform == cropped_transform()
+        assert session.measurement.settings == MeasurementSettings()
+    assert "busy result" in session.measurement_cleanup_error
+    store.fails = False
+    session.cleanup_measurement_results()
+    assert store.cleaned
+    assert session.measurement_cleanup_error is None
 
 
 @pytest.fixture(autouse=True)
@@ -824,6 +1095,7 @@ def test_confirming_single_frame_hides_sliders_until_full_reset():
 
 
 def test_launch_viewer_keeps_ui_alive_while_event_loop_runs(monkeypatch, tmp_path):
+    shutdown_calls = []
     class FakeReader:
         path = tmp_path / "sample.seq"
         num_frames = 1
@@ -837,7 +1109,8 @@ def test_launch_viewer_keeps_ui_alive_while_event_loop_runs(monkeypatch, tmp_pat
             return None
 
     class ViewerToken:
-        pass
+        def shutdown_analysis(self, *, wait=False):
+            shutdown_calls.append(wait)
 
     token_reference = None
 
@@ -857,6 +1130,7 @@ def test_launch_viewer_keeps_ui_alive_while_event_loop_runs(monkeypatch, tmp_pat
     monkeypatch.setattr(viewer.plt, "show", fake_show)
 
     viewer.launch_viewer(tmp_path / "sample.seq")
+    assert shutdown_calls == [True]
 
 
 def saved_startup_view(tmp_path):
@@ -956,14 +1230,16 @@ def test_startup_pending_blocks_auto_and_manual_loading(tmp_path, monkeypatch, c
     assert session.state_signature() == before
 
 
-@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("version", [1, 2, 3])
 def test_startup_launch_restores_before_first_draw_and_does_not_reload(tmp_path, monkeypatch, version):
     from contextlib import nullcontext
     reader, config, document = saved_startup_view(tmp_path)
-    if version == 1:
+    if version < 3:
         payload = document.to_dict()
-        payload["schema_version"] = 1
-        del payload["transform"]
+        payload["schema_version"] = version
+        del payload["measurement"]
+        if version == 1:
+            del payload["transform"]
         config.write_text(json.dumps(payload), encoding="utf-8")
     monkeypatch.setattr(viewer, "ScienceFileReader", lambda _: nullcontext(reader))
     original_build = viewer.build_viewer

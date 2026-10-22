@@ -1,10 +1,10 @@
 # FLIR SEQ 本地处理工具
 
-当前已实现 FLIR ResearchIR FFF `.seq` 的只读检查、摄氏温度逐帧浏览、工作时间范围选择、范围配置保存/加载、原生子 SEQ 导出，以及旋转裁剪预览与应用。测温点、矩形 ROI 分析、温度曲线/轴向分布导出和 MP4 导出尚未实现。
+当前已实现 FLIR ResearchIR FFF `.seq` 的只读检查、摄氏温度逐帧浏览、工作时间范围选择、配置保存/加载、原生子 SEQ 导出，以及旋转裁剪预览与应用。本轮增加 Process / Measure 单窗口页面、多矩形 ROI、当前帧统计/分布/剖面、后台帧曲线及可追溯 CSV/PNG 导出；独立测温点和 MP4 导出尚未实现。
 
 唯一工作目录为 `D:\carbonfoam\infrared`。原始文件放在 `raw`，始终只读；保存配置时默认打开 `selections`，可命名另存；子 SEQ 及同名视图配置默认配套导出到 `clips`。
 
-版本与维护：[已知问题及验收记录](docs/KNOWN_ISSUES.md)、[版本变更记录](CHANGELOG.md)、[维护流程](docs/MAINTENANCE.md)。`0.1.0` 已保存为基线；本轮修复在 `codex/fix-viewer-workflow`，尚未合并或发布，Windows 原生界面及大文件仍待人工验收。
+版本与维护：[已知问题及验收记录](docs/KNOWN_ISSUES.md)、[版本变更记录](CHANGELOG.md)、[维护流程](docs/MAINTENANCE.md)。此前工作流修复已保存为 `0031a0f` 基线；本轮 Process / Measure 在 `codex/process-measure` 本地实现，未合并、推送或发布，Windows 原生界面及大文件仍待人工验收。
 
 ## 环境
 
@@ -78,6 +78,8 @@ python -m flir_seq_tool view raw\Rec-000366-240_09_26_37_152.seq --vmin 20 --vma
 
 ## 选择工作时间范围
 
+启动命令不变，默认进入 **Process**。顶部 **Measure** 切换到测量页，始终使用已 `Confirm range` 的工作范围和已 Apply 的变换；尚未确认的 Process 候选范围不会悄悄改变测量范围。Measure 提供同一条 `Current frame` 滑块和局部帧号输入框。
+
 查看器保留 `Current frame` 浏览滑块，并提供 `Selected range` 双端滑块。拖动范围端点时，画面自动跳到对应帧；也可在 `Start frame` 和 `End frame` 输入局部整数帧号并按 Enter 精确定位。
 
 点击 `Confirm range` 后，所选范围成为新的工作时间轴，两条滑块重新编号为 `0` 至 `N-1`。标题和状态区继续显示原始 SEQ 帧号、绝对时间、相对时间及基于真实端点时间戳的持续时间。可以在新区间内继续选择并确认，从而反复缩小范围；点击 `Reset full` 一次恢复完整序列。
@@ -88,11 +90,41 @@ python -m flir_seq_tool view raw\Rec-000366-240_09_26_37_152.seq --vmin 20 --vma
 
 `Save selection` 弹出保存文件框，保存当前候选时间范围、固定温标和已应用的旋转裁剪配置。可分别命名为方案 A/B；未填后缀时自动补 `.selection.json`。覆盖已有文件需要确认，确认后目标或 `.bak` 被外部改动则拒绝覆盖。保存使用临时文件校验和原子替换，保留单份 `.bak`。
 
-`Load selection` 弹出文件选择框，**不是加载最新文件**。先验证所选配置及源文件身份，有未保存修改时再询问是否替换当前视图。取消打开、保存或覆盖均不改变当前状态。旧版 v1 配置仍可读取，按未旋转、未裁剪处理，不自动改写文件。
+新配置为 schema v3，增加 ROI 与显示设置，兼容读取旧 v1/v2（其 ROI 为空，不重写旧文件）。Process 的 `Save selection` 保存候选范围；Measure 的 `Save setup` 保存已确认范围，原生保存框标题注明该范围。两者都保存已应用变换及 ROI，但不保存 SQLite 统计结果。候选范围和已确认范围不同，保存其中之一不会把另一范围的修改标记为已保存。加载配置返回其工作范围、变换和 ROI；帧曲线需要重新 Calculate。
+
+## ROI 与测量输出
+
+在 Measure 点击 `Add ROI` 后在热图拖框，Esc 取消；每次只编辑一个活跃框。右栏支持名字、整数 x/y/width/height、删除及每页四行的 ROI 列表。列表行选择活跃 ROI；左侧勾选仅控制帧曲线和曲线导出的包含项，不改变当前帧卡片的活跃 ROI。完整长名称可用 F1 查看。
+
+- 卡片显示有限像素的均值、最小、最大、温差和总体标准差（`ddof=0`），标明有效/总像素；全无效显示 N/A，单像素温差与标准差为零。
+- `Current frame` → `Distribution`：32 个自动温度箱，纵轴为有效像素比例，箱边界逐帧变化。`Profile` → `Horizontal` / `Vertical`：按列/按行平均，横轴为裁剪后像素坐标，不是毫米或物理距离。无有限值的位置留空断线。
+- 任意非直角旋转会插值，所有测量基于已重采样的温度矩阵，不声称等同于原始探测像素测温。纯裁剪和直角旋转沿用精确重排。
+- `Frame curves` → `Calculate` 显式扫描工作范围内所有 ROI（包括未勾选项），使用独立 reader 和临时 SQLite，不将全时序温度矩阵载入内存。上图选择 Mean/Min/Max，下图固定 ΔT。显示最多按 2000 个桶抽稀并保留极值，缺失不连线；CSV 始终导出所有原始统计行。
+- 计算期间编辑、切页和原生子 SEQ 导出被锁定；`Cancel` 等当前 SDK 调用结束。失败/取消可保留同一输入的旧结果。范围或 ROI 几何改变使结果失效；变换 Apply 前确认清空 ROI。改名、勾选、颜色和曲线指标不重算。
+- `Export CSV` / `Export PNG` 根据当前子视图冻结当前帧或曲线，再选择输出路径，默认目录为 `analysis`。CSV 使用 UTF-8 BOM、完整精度、真实时间戳、源身份、变换、ROI 和版本列；PNG 单独重绘无 GUI 的报告图。曲线全未勾选、无结果或失效时禁用输出。
+- 输出先写临时文件、解析验证后原子替换，覆盖需确认且核验目标快照，拒绝 raw、源文件及其别名。取消不创建输出，失败不静默转存其他路径；F1 查看完整错误。stat 检查不承诺消除所有跨进程竞争。
+
+回到 Process 使用 `Load selection` 选择刚才的 setup 文件（Measure 不另设 Load 按钮），**不是加载最新文件**。先验证所选配置及源文件身份，有未保存修改时再询问是否替换当前视图。取消打开、保存或覆盖均不改变当前状态。旧版 v1 配置仍可读取，按未旋转、未裁剪处理，不自动改写文件。
 
 `Apply` 只应用变换，不写配置。常用流程是 `Edit transform → Apply → Save selection` 保存方案；若要导出时间切片，可直接 `Apply → 填 Clip name → Export sub-SEQ → Confirm export`，**无须先 Save selection**。编辑中的草稿不可保存或导出，必须先应用或取消。
 
 编辑模式与普通模式共用窗口，但各自显示自己的控件和提示。建议窗口至少为 1000×800（100 DPI；其他 DPI 按比例放大）。较小窗口会提示放大；长路径/错误会缩略，按 `F1` 查看完整详情，同时输出到终端。
+
+### 人工试用顺序
+
+在 PowerShell 中进入 `D:\carbonfoam\infrared`，使用装有官方 FileSDK 的 Python（不要使用缺少 FileSDK 的 Anaconda 环境）：
+
+```powershell
+python -m flir_seq_tool view raw\Rec-000366-240_09_26_37_152.seq --vmin 23 --vmax 45
+```
+
+1. Process 输入 Start=10、End=14，点 `Confirm range`；`Edit transform` 输入 Total=-2.3，点 `Apply`。这一步先于创建 ROI。
+2. 切 Measure，用 `Add ROI` 在样品上画三个框。选择不同列表行，检查卡片、Distribution、Profile 的 Horizontal/Vertical；拖滑块或输入 Frame。
+3. 点 `Frame curves`、`Calculate`，检查 Mean/Min/Max 与下图 ΔT；取消/恢复勾选，确认不删除 ROI。改一个 ROI 宽度，确认显示失效后再 Calculate。全不勾选时不能导出曲线。
+4. Measure 点 `Save setup` 命名保存；回 Process 点 `Load selection` 明确选择该文件，再切 Measure，检查框与名称恢复、曲线为空待重算。另设一个未 Confirm 的候选范围，比较 Process `Save selection` 与 Measure `Save setup` 保存范围。
+5. 分别在 Distribution、双向 Profile、Frame curves 下导出 CSV/PNG，打开输出检查列、完整行数和无 GUI 图。返回 Process 再 Apply 不同变换，确认清空 ROI 提示；拒绝时保留原 ROI。
+
+2026-10-22 用户反馈基础操作测试通过、当前操作未发现问题。上述清单保留作回归步骤；未逐项报告的边界测试和大文件性能不据此认定已全部验收。
 
 ## 旋转与裁剪
 

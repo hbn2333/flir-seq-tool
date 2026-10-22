@@ -18,4 +18,5 @@ dist/
 # Local runtime outputs; source SEQ files remain external data, not code.
 clips/
 selections/
+analysis/
 *.partial.seq

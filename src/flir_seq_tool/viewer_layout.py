@@ -6,6 +6,15 @@ from matplotlib.text import Text
 from matplotlib.widgets import TextBox
 
 
+NAV_RECTS = {"process": (0.08, 0.955, 0.13, 0.032), "measure": (0.22, 0.955, 0.13, 0.032)}
+MEASURE_IMAGE_RECT = (0.075, 0.61, 0.46, 0.29)
+MEASURE_COLORBAR_RECT = (0.55, 0.61, 0.018, 0.29)
+MEASURE_CURRENT_RECT = (0.15, 0.535, 0.48, 0.025)
+MEASURE_RESULT_RECT = (0.12, 0.25, 0.76, 0.19)
+MEASURE_CURVE_TEMP_RECT = (0.12, 0.355, 0.76, 0.085)
+MEASURE_CURVE_DELTA_RECT = (0.12, 0.25, 0.76, 0.09)
+
+
 NORMAL_RECTS = {
     "current": (0.15, 0.47, 0.65, 0.025),
     "range": (0.15, 0.425, 0.65, 0.025),
@@ -30,7 +39,7 @@ EDITOR_RECTS = {
 # All information is top-aligned: multi-line text grows into its own region.
 TEXT_POSITIONS = {
     "export": (0.15, 0.235),
-    "progress": (0.15, 0.163),
+    "progress": (0.15, 0.145),
     "editor_status": (0.15, 0.190),
     "editor_error": (0.15, 0.163),
     "transform": (0.15, 0.125),

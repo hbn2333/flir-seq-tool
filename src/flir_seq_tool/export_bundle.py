@@ -54,6 +54,7 @@ def build_clip_document(
         source=source, source_start_frame=0, source_end_frame=source.num_frames - 1,
         start_timestamp=first, end_timestamp=last,
         display=view_document.display, transform=view_document.transform,
+        measurement=view_document.measurement,
     )
 
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import ceil, floor
 from typing import Callable
 
 from matplotlib.axes import Axes
@@ -9,6 +8,7 @@ from matplotlib.figure import Figure
 from matplotlib.text import Text
 from matplotlib.widgets import Button, RectangleSelector, Slider, TextBox
 from .viewer_layout import BoundedMessage, EDITOR_RECTS, label_above
+from .pixel_geometry import rect_from_extents
 
 from .transform import (
     CropRect,
@@ -281,12 +281,8 @@ def build_transform_editor(
             or abs(display_high[1] - display_low[1]) <= editor.selector.minspany
         ):
             return
-        # Absorb only numerical roundoff at integer pixel-center boundaries.
-        tolerance = 1e-9
-        left, right = ceil(low_x - tolerance), floor(high_x + 1.0 + tolerance)
-        top, bottom = ceil(low_y - tolerance), floor(high_y + 1.0 + tolerance)
         try:
-            crop = CropRect(left, top, right - left, bottom - top)
+            crop = rect_from_extents((low_x, high_x, low_y, high_y))
         except (TypeError, ValueError) as exc:
             editor._sync_controls()
             editor._set_error(str(exc))

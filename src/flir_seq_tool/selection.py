@@ -4,16 +4,17 @@ import json
 import math
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .transform import CropRect, FrameTransform, RotationSettings
+from .measurement_models import MeasurementSettings
 from .file_safety import DEFAULT_RAW_ROOT, TargetSnapshot, assert_snapshot, validate_write_path
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _TIME_TOLERANCE_S = 1e-6
 
 
@@ -79,20 +80,12 @@ def _validate_root_version_and_keys(
     if "schema_version" not in root:
         raise ValueError("schema_version is required")
     schema_version = _require_int(root["schema_version"], "schema_version")
-    if schema_version == 1:
-        _require_keys(
-            root,
-            {"schema_version", "source", "selection", "display"},
-            "root",
-        )
-    elif schema_version == SCHEMA_VERSION:
-        _require_keys(
-            root,
-            {"schema_version", "source", "selection", "display", "transform"},
-            "root",
-        )
-    else:
+    root_keys = {"schema_version", "source", "selection", "display"}
+    expected = {1: root_keys, 2: root_keys | {"transform"},
+                3: root_keys | {"transform", "measurement"}}
+    if schema_version not in expected:
         raise ValueError(f"unsupported schema_version: {schema_version}")
+    _require_keys(root, expected[schema_version], "root")
     return root, schema_version
 
 
@@ -346,6 +339,7 @@ class SelectionDocument:
     selection: FrameSelection
     display: DisplaySettings
     transform: FrameTransform
+    measurement: MeasurementSettings = field(default_factory=MeasurementSettings)
 
     def __post_init__(self) -> None:
         _require_int(self.schema_version, "schema_version")
@@ -360,6 +354,9 @@ class SelectionDocument:
             or self.transform.source_height != self.source.height
         ):
             raise ValueError("transform source dimensions must match source")
+        if not isinstance(self.measurement, MeasurementSettings):
+            raise ValueError("measurement must be MeasurementSettings")
+        self.measurement.validate_bounds(self.transform.crop.width, self.transform.crop.height)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -368,6 +365,7 @@ class SelectionDocument:
             "selection": self.selection.to_dict(),
             "display": self.display.to_dict(),
             "transform": transform_to_dict(self.transform),
+            "measurement": self.measurement.to_dict(),
         }
 
     @classmethod
@@ -390,6 +388,8 @@ class SelectionDocument:
                 _require_mapping(root["display"], "display")
             ),
             transform=transform,
+            measurement=(MeasurementSettings.from_dict(root["measurement"])
+                         if schema_version == 3 else MeasurementSettings()),
         )
 
 
@@ -402,6 +402,7 @@ def build_selection_document(
     end_timestamp: datetime,
     display: DisplaySettings,
     transform: FrameTransform | None = None,
+    measurement: MeasurementSettings | None = None,
 ) -> SelectionDocument:
     return SelectionDocument(
         schema_version=SCHEMA_VERSION,
@@ -420,6 +421,7 @@ def build_selection_document(
             if transform is None
             else transform
         ),
+        measurement=MeasurementSettings() if measurement is None else measurement,
     )
 
 

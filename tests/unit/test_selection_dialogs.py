@@ -119,3 +119,20 @@ def test_worker_thread_cannot_open_dialog(fake_tk, tmp_path):
         with pytest.raises(RuntimeError, match="main thread"):
             job.result()
     assert not roots and not calls
+
+
+@pytest.mark.parametrize("kind", ["csv", "png"])
+def test_analysis_export_dialog_normalizes_suffix_and_preserves_parent_lifecycle(fake_tk, tmp_path, kind):
+    from flir_seq_tool.selection_dialogs import SelectionDialogs
+    roots, calls, behavior, _, _ = fake_tk
+    behavior.value = str(tmp_path / "result")
+    chosen = SelectionDialogs().choose_analysis_export(kind, tmp_path, f"suggested.{kind}")
+    assert chosen == tmp_path / f"result.{kind}"
+    assert calls[0]["confirmoverwrite"] is False
+    assert calls[0]["initialfile"] == f"suggested.{kind}"
+    assert roots[0].destroyed
+    behavior.value = str(tmp_path / "bad.seq")
+    with pytest.raises(ValueError, match="filename"):
+        SelectionDialogs().choose_analysis_export(kind, tmp_path, "result")
+    behavior.value = ""
+    assert SelectionDialogs().choose_analysis_export(kind, tmp_path, "result") is None
