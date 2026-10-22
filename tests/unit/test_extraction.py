@@ -88,6 +88,15 @@ def test_build_export_request_uses_closed_range_and_fixed_root(tmp_path: Path):
     assert request.duration_s == pytest.approx(0.08)
 
 
+def test_confirmation_signature_distinguishes_directories(tmp_path):
+    request = make_request(tmp_path)
+    other = tmp_path / "other"
+    second = replace(request, clips_root=other, target_path=other / request.target_path.name)
+    kwargs = dict(work_source_range=(0, 19), writable_formats=lambda: ["SEQ-FFF"],
+                  free_bytes=lambda _path: 10**9)
+    assert preflight_export(request, **kwargs).signature != preflight_export(second, **kwargs).signature
+
+
 def test_required_space_uses_average_frame_size_and_64_mib_floor():
     assert required_free_bytes(1000, 100, 10) == 64 * 1024 * 1024 + 100
 

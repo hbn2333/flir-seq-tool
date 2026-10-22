@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
 import json
@@ -474,7 +474,6 @@ class ViewerUI:
     transform_status_text: Text
     normal_control_axes: tuple[Axes, ...]
     mode_state: ViewerModeState
-    clip_name_box: TextBox
     export_button: Button
     cancel_button: Button
     export_text: Text
@@ -587,7 +586,6 @@ def build_viewer(
     save_axes = figure.add_axes(NORMAL_RECTS["save"])
     load_axes = figure.add_axes(NORMAL_RECTS["load"])
     edit_transform_axes = figure.add_axes(NORMAL_RECTS["edit"])
-    clip_name_axes = figure.add_axes(NORMAL_RECTS["clip"])
     export_axes = figure.add_axes(NORMAL_RECTS["export"])
     cancel_axes = figure.add_axes(NORMAL_RECTS["cancel"])
     slider_max = max(1, session.reader.num_frames - 1)
@@ -625,12 +623,11 @@ def build_viewer(
     save_button = Button(save_axes, "Save selection")
     load_button = Button(load_axes, "Load selection")
     edit_transform_button = Button(edit_transform_axes, "Edit transform")
-    clip_name_box = TextBox(clip_name_axes, "Clip name", initial="")
     export_button = Button(export_axes, "Export sub-SEQ")
     cancel_button = Button(cancel_axes, "Cancel export")
     cancel_button.set_active(False)
     message_details: dict[str, str] = {}
-    export_text = BoundedMessage(figure, "export", message_details, max_lines=3, fontsize=7.5)
+    export_text = BoundedMessage(figure, "export", message_details, max_lines=5, fontsize=7.5)
     progress_text = BoundedMessage(figure, "progress", message_details, max_lines=1)
     transform_status_text = BoundedMessage(figure, "transform", message_details, max_lines=1)
     status_text = BoundedMessage(figure, "timeline", message_details, max_lines=2)
@@ -656,7 +653,6 @@ def build_viewer(
         save_axes,
         load_axes,
         edit_transform_axes,
-        clip_name_axes,
         export_axes,
         cancel_axes,
     )
@@ -973,7 +969,7 @@ def build_viewer(
         # stop Matplotlib widgets from grabbing mouse input in the other mode.
         for control in (
             start_box, end_box, confirm_button, reset_button, save_button,
-            load_button, edit_transform_button, clip_name_box, export_button,
+            load_button, edit_transform_button, export_button,
         ):
             control.set_active(visible)
         range_slider.set_active(visible and session.timeline.local_num_frames > 1)
@@ -1054,13 +1050,13 @@ def build_viewer(
         save_button.set_active(active)
         load_button.set_active(active)
         edit_transform_button.set_active(active)
-        clip_name_box.set_active(active)
         export_button.set_active(active)
         cancel_button.set_active(not active)
         pages.set_busy(None if active else "native_export")
 
-    def current_confirmation() -> ExportConfirmation:
-        request = session.export_request(clip_name_box.text, Path(clips_root))
+    def current_confirmation(target: Path) -> ExportConfirmation:
+        request = session.export_request(target.name, target.parent)
+        request = replace(request, target_path=target)
         return preflight_export(
             request,
             work_source_range=(
@@ -1078,7 +1074,17 @@ def build_viewer(
         if export_state.job is not None and export_state.job.is_alive():
             return
         try:
-            confirmation = current_confirmation()
+            if export_state.confirmation is None:
+                source_start = session.timeline.source_frame_at(session.timeline.pending_start)
+                source_end = session.timeline.source_frame_at(session.timeline.pending_end)
+                suggested = f"{Path(session.reader.path).stem}-{source_start}-{source_end}.seq"
+                target = dialogs.choose_seq_export(Path(clips_root), suggested)
+                if target is None:
+                    return
+                target = Path(target).absolute()
+            else:
+                target = export_state.confirmation.request.target_path
+            confirmation = current_confirmation(target)
         except (OSError, ValueError, RuntimeError) as exc:
             invalidate_export_confirmation()
             set_error(f"Export preflight failed: {exc}")
@@ -1387,7 +1393,7 @@ def build_viewer(
     measure_panel.on_export = on_analysis_export
 
     process_widgets = (range_slider, start_box, end_box, confirm_button, reset_button,
-                       save_button, load_button, edit_transform_button, clip_name_box,
+                       save_button, load_button, edit_transform_button,
                        export_button, cancel_button)
     def process_availability(widget) -> bool:
         if mode_state.editing_transform:
@@ -1458,15 +1464,6 @@ def build_viewer(
     save_button.on_clicked(on_save)
     load_button.on_clicked(on_load)
     edit_transform_button.on_clicked(on_edit_transform)
-    def on_clip_name_submit(_text: str) -> None:
-        if mode_state.editing_transform:
-            set_error("Cannot change export settings while editing transform")
-            return
-        if not process_input_available():
-            return
-        invalidate_export_confirmation()
-
-    clip_name_box.on_submit(on_clip_name_submit)
     export_button.on_clicked(on_export)
     cancel_button.on_clicked(on_cancel)
     figure.canvas.mpl_connect("close_event", on_close)
@@ -1497,7 +1494,6 @@ def build_viewer(
         transform_status_text=transform_status_text,
         normal_control_axes=normal_control_axes,
         mode_state=mode_state,
-        clip_name_box=clip_name_box,
         export_button=export_button,
         cancel_button=cancel_button,
         export_text=export_text,

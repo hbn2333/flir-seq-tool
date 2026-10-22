@@ -61,6 +61,11 @@ class FakeSelectionDialogs:
         self.confirmations = []
         self.details = []
         self.choices = []
+        self.seq_target = None
+
+    def choose_seq_export(self, initial_dir, suggested_name):
+        self.choices.append(("seq", initial_dir, suggested_name))
+        return self.seq_target
 
     def choose_save(self, initial_dir, suggested_name, **kwargs):
         self.choices.append(("save", initial_dir, suggested_name))
@@ -219,11 +224,12 @@ def test_single_frame_slider_remains_disabled_after_page_return():
 
 def test_native_cancel_is_clickable_after_busy_page_refresh(tmp_path):
     session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / "s.seq"))
+    dialogs = FakeSelectionDialogs()
+    dialogs.seq_target = tmp_path / "chosen" / "useful.seq"
     jobs = []
-    ui = build_viewer(session, clips_root=tmp_path / "clips",
+    ui = build_viewer(session, dialogs=dialogs, clips_root=tmp_path / "clips",
                       export_job_factory=lambda request: jobs.append(FakeExportJob(request)) or jobs[-1])
     try:
-        ui.clip_name_box.set_val("clip")
         _drag_control(ui, ui.export_button, .5, .5)
         _drag_control(ui, ui.export_button, .5, .5)
         ui.pages.refresh()
@@ -1642,17 +1648,116 @@ class FakeExportJob:
         )
 
 
+@pytest.mark.parametrize("changed", [None, "seq", "sidecar"])
+def test_save_as_export_retains_path_and_reconfirms_external_changes(tmp_path, changed):
+    from flir_seq_tool.export_bundle import sidecar_path
+    session = ViewerSession(FileBackedFakeReader(make_frames(10), tmp_path / "source.seq"))
+    dialogs = FakeSelectionDialogs()
+    dialogs.seq_target = tmp_path / "other" / "chosen.SEQ"
+    jobs = []
+    ui = build_viewer(session, dialogs=dialogs, clips_root=tmp_path / "clips",
+                      export_job_factory=lambda request: jobs.append(FakeExportJob(request)) or jobs[-1])
+    try:
+        ui.range_slider.set_val((2, 7))
+        ui.export_button._observers.process("clicked", None)
+        assert ui.export_state.confirmation is not None
+        assert ui.export_state.confirmation.request.target_path == dialogs.seq_target
+        assert dialogs.choices == [("seq", tmp_path / "clips", "source-2-7.seq")]
+        assert not jobs
+        if changed:
+            path = dialogs.seq_target if changed == "seq" else sidecar_path(dialogs.seq_target)
+            path.write_bytes(b"external content")
+        ui.export_button._observers.process("clicked", None)
+        if changed:
+            assert not jobs
+            assert "OVERWRITE" in ui.export_state.confirmation.summary
+            ui.figure.set_size_inches(10, 8)
+            ui.figure.canvas.draw()
+            assert "OVERWRITE" in ui.export_text.get_text()
+            assert "Existing selection:" in ui.export_text.get_text()
+            assert path.read_bytes() == b"external content"
+            ui.export_button._observers.process("clicked", None)
+        assert len(jobs) == 1 and jobs[0].started
+        assert len(dialogs.choices) == 1
+        assert not hasattr(ui, "clip_name_box")
+    finally:
+        plt.close(ui.figure)
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_save_as_cancel_or_error_does_not_write_and_allows_retry(tmp_path, failure):
+    session = ViewerSession(FileBackedFakeReader(make_frames(3), tmp_path / "source.seq"))
+    dialogs = FakeSelectionDialogs()
+    original = dialogs.choose_seq_export
+    if failure:
+        def fail(*args):
+            raise RuntimeError("dialog unavailable")
+        dialogs.choose_seq_export = fail
+    ui = build_viewer(session, dialogs=dialogs, clips_root=tmp_path / "absent")
+    try:
+        ui.export_button._observers.process("clicked", None)
+        assert ui.export_state.confirmation is None
+        assert ui.export_state.job is None
+        assert not (tmp_path / "absent").exists()
+        assert ui.export_button.active and ui.range_slider.active
+        dialogs.choose_seq_export = original
+        dialogs.seq_target = tmp_path / "retry.seq"
+        ui.export_button._observers.process("clicked", None)
+        assert ui.export_state.confirmation.request.target_path == dialogs.seq_target
+        ui.range_slider.set_val((1, 2))
+        assert ui.export_state.confirmation is None
+        ui.export_button._observers.process("clicked", None)
+        assert dialogs.choices[-1][2] == "source-1-2.seq"
+    finally:
+        plt.close(ui.figure)
+
+
+@pytest.mark.parametrize("target_kind", ["source", "hardlink", "raw", "pending"])
+def test_save_as_rejects_protected_or_unfinished_targets(tmp_path, monkeypatch, target_kind):
+    from pathlib import Path
+    from flir_seq_tool.export_bundle import pending_path
+    from flir_seq_tool.extraction import preflight_export
+    source = tmp_path / "source.seq"
+    session = ViewerSession(FileBackedFakeReader(make_frames(3), source))
+    protected = tmp_path / "raw"
+    monkeypatch.setattr(viewer, "preflight_export",
+                        lambda request, **kwargs: preflight_export(request, raw_root=protected, **kwargs))
+    target = tmp_path / "target.seq"
+    if target_kind == "source":
+        target = source
+    elif target_kind == "hardlink":
+        target.hardlink_to(source)
+    elif target_kind == "raw":
+        target = protected / "nested" / "target.seq"
+    else:
+        pending_path(target).write_text("unresolved", encoding="utf-8")
+    dialogs = FakeSelectionDialogs()
+    dialogs.seq_target = target
+    ui = build_viewer(session, dialogs=dialogs)
+    try:
+        ui.export_button._observers.process("clicked", None)
+        assert ui.export_state.confirmation is None
+        assert ui.export_state.job is None
+        assert "Export preflight failed" in ui.message_details["message"]
+        assert source.read_bytes() == b"fake-seq-source"
+        assert not protected.exists()
+        if target_kind == "pending":
+            assert pending_path(target).read_text(encoding="utf-8") == "unresolved"
+    finally:
+        plt.close(ui.figure)
+
+
 def test_export_first_click_arms_second_click_and_range_change_invalidates(tmp_path):
     reader = FileBackedFakeReader(make_frames(count=10), tmp_path / "sample.seq")
     session = ViewerSession(reader, selection_store=SelectionStore(tmp_path / "selections"))
+    dialogs = FakeSelectionDialogs()
+    dialogs.seq_target = tmp_path / "chosen" / "useful.seq"
     jobs = []
     ui = build_viewer(
-        session,
+        session, dialogs=dialogs,
         clips_root=tmp_path / "clips",
         export_job_factory=lambda request: jobs.append(FakeExportJob(request)) or jobs[-1],
     )
-    ui.clip_name_box.set_val("useful")
-
     ui.export_button._observers.process("clicked", None)
 
     assert ui.export_button.label.get_text() == "Confirm export"
@@ -1669,20 +1774,21 @@ def test_export_first_click_arms_second_click_and_range_change_invalidates(tmp_p
 def test_export_second_click_starts_job_locks_controls_and_poll_restores(tmp_path):
     reader = FileBackedFakeReader(make_frames(count=10), tmp_path / "sample.seq")
     session = ViewerSession(reader, selection_store=SelectionStore(tmp_path / "selections"))
+    dialogs = FakeSelectionDialogs()
+    dialogs.seq_target = tmp_path / "chosen" / "useful.seq"
     jobs = []
     ui = build_viewer(
-        session,
+        session, dialogs=dialogs,
         clips_root=tmp_path / "clips",
         export_job_factory=lambda request: jobs.append(FakeExportJob(request)) or jobs[-1],
     )
-    ui.clip_name_box.set_val("useful")
     ui.range_slider.set_val((2, 7))
     ui.export_button._observers.process("clicked", None)
     ui.export_button._observers.process("clicked", None)
 
     assert len(jobs) == 1 and jobs[0].started
     assert ui.range_slider.active is False
-    assert ui.clip_name_box.active is False
+    assert ui.export_button.active is False
     assert ui.save_button.active is False
     assert ui.cancel_button.active is True
 
@@ -1690,7 +1796,7 @@ def test_export_second_click_starts_job_locks_controls_and_poll_restores(tmp_pat
     ui.poll_export()
 
     assert ui.range_slider.active is True
-    assert ui.clip_name_box.active is True
+    assert ui.export_button.active is True
     assert ui.save_button.active is True
     assert ui.cancel_button.active is False
     assert "succeeded" in ui.export_text.get_text()
@@ -1794,13 +1900,14 @@ def test_transform_editing_blocks_all_normal_mode_handlers_but_apply_works(
 def test_cancel_button_requests_running_export_cancel(tmp_path):
     reader = FileBackedFakeReader(make_frames(count=10), tmp_path / "sample.seq")
     session = ViewerSession(reader, selection_store=SelectionStore(tmp_path / "selections"))
+    dialogs = FakeSelectionDialogs()
+    dialogs.seq_target = tmp_path / "chosen" / "useful.seq"
     jobs = []
     ui = build_viewer(
-        session,
+        session, dialogs=dialogs,
         clips_root=tmp_path / "clips",
         export_job_factory=lambda request: jobs.append(FakeExportJob(request)) or jobs[-1],
     )
-    ui.clip_name_box.set_val("useful")
     ui.export_button._observers.process("clicked", None)
     ui.export_button._observers.process("clicked", None)
 
@@ -1814,13 +1921,14 @@ def test_cancel_button_requests_running_export_cancel(tmp_path):
 def test_window_close_requests_cancel_and_performs_bounded_join(tmp_path):
     reader = FileBackedFakeReader(make_frames(count=10), tmp_path / "sample.seq")
     session = ViewerSession(reader, selection_store=SelectionStore(tmp_path / "selections"))
+    dialogs = FakeSelectionDialogs()
+    dialogs.seq_target = tmp_path / "chosen" / "useful.seq"
     jobs = []
     ui = build_viewer(
-        session,
+        session, dialogs=dialogs,
         clips_root=tmp_path / "clips",
         export_job_factory=lambda request: jobs.append(FakeExportJob(request)) or jobs[-1],
     )
-    ui.clip_name_box.set_val("useful")
     ui.export_button._observers.process("clicked", None)
     ui.export_button._observers.process("clicked", None)
 

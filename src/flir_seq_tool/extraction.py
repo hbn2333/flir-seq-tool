@@ -219,7 +219,7 @@ def preflight_export(
     request = replace(request, target_snapshot=target_snapshot, sidecar_snapshot=sidecar_snapshot)
     overwrite = target_snapshot.exists or (sidecar_snapshot is not None and sidecar_snapshot.exists)
     signature = (
-        request.target_path.name,
+        str(request.target_path.absolute()),
         request.source_start_frame,
         request.source_end_frame,
         work_source_range[0],
@@ -230,15 +230,18 @@ def preflight_export(
     )
     overwrite_text = "YES (OVERWRITE)" if target_snapshot.exists else "NO"
     summary = (
+        f"Existing target: {overwrite_text}"
+        + (" | Existing selection: " + ("YES (OVERWRITE)" if sidecar_snapshot.exists else "NO")
+           if sidecar_snapshot is not None else "")
+        + "\n"
         f"Target: {request.target_path}\n"
         f"Source frames: [{request.source_start_frame}, {request.source_end_frame}] | "
         f"Frames: {request.frame_count} | Duration: {request.duration_s:.3f} s\n"
         f"Time: {request.start_timestamp.isoformat()} -> "
-        f"{request.end_timestamp.isoformat()} | Existing target: {overwrite_text}"
+        f"{request.end_timestamp.isoformat()}"
     )
     if sidecar_snapshot is not None:
-        summary += (f"\nSelection: {sidecar_path(request.target_path)} | Existing selection: "
-                    + ("YES (OVERWRITE)" if sidecar_snapshot.exists else "NO"))
+        summary += f"\nSelection: {sidecar_path(request.target_path)}"
     return ExportConfirmation(
         request=request,
         work_source_range=work_source_range,

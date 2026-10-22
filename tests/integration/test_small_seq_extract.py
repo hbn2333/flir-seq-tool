@@ -70,7 +70,7 @@ def test_real_paired_export_reopens_with_matching_transformed_temperatures(tmp_p
         session.timeline.set_pending(10, 14)
         session.apply_transform(session.applied_transform.with_angle(-2.3))
         expected = [session.frame_at(index).temperature_c.copy() for index in (10, 12, 14)]
-        request = session.export_request("real_five_frames", tmp_path / "clips")
+        request = session.export_request("real_five_frames", tmp_path / "chosen-output" / "trial")
         confirmation = preflight_export(request, work_source_range=(0, 64))
         job = ExportJob(confirmation.request)
         job.start()

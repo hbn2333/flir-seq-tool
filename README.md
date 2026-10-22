@@ -106,7 +106,7 @@ python -m flir_seq_tool view raw\Rec-000366-240_09_26_37_152.seq --vmin 20 --vma
 
 回到 Process 使用 `Load selection` 选择刚才的 setup 文件（Measure 不另设 Load 按钮），**不是加载最新文件**。先验证所选配置及源文件身份，有未保存修改时再询问是否替换当前视图。取消打开、保存或覆盖均不改变当前状态。旧版 v1 配置仍可读取，按未旋转、未裁剪处理，不自动改写文件。
 
-`Apply` 只应用变换，不写配置。常用流程是 `Edit transform → Apply → Save selection` 保存方案；若要导出时间切片，可直接 `Apply → 填 Clip name → Export sub-SEQ → Confirm export`，**无须先 Save selection**。编辑中的草稿不可保存或导出，必须先应用或取消。
+`Apply` 只应用变换，不写配置。常用流程是 `Edit transform → Apply → Save selection` 保存方案；若要导出时间切片，可直接 `Apply → Export sub-SEQ → 选择目录和文件名 → Confirm export`，**无须先 Save selection**。编辑中的草稿不可保存或导出，必须先应用或取消。
 
 编辑模式与普通模式共用窗口，但各自显示自己的控件和提示。建议窗口至少为 1000×800（100 DPI；其他 DPI 按比例放大）。较小窗口会提示放大；长路径/错误会缩略，按 `F1` 查看完整详情，同时输出到终端。
 
@@ -139,7 +139,11 @@ python -m flir_seq_tool view raw\Rec-000366-240_09_26_37_152.seq --vmin 23 --vma
 
 ## 原生子 SEQ 导出
 
-`Clip name` 是输出子 SEQ 的名称，不是配置方案名称。例如填写 `trial_A`，第一次点击 `Export sub-SEQ` 显示范围、两个目标及各自覆盖状态，第二次确认才执行：
+第一次点击 `Export sub-SEQ` 打开原生“另存为”，默认目录为 `clips`，建议文件名为源文件主名加原始帧范围。可选择其他目录和文件名；未填写扩展名时补充 `.seq`。取消对话框不会启动导出。
+
+选择后显示范围、SEQ 与配套配置的完整路径及各自覆盖状态，第二次点击 `Confirm export` 才执行，不重复弹出对话框。长路径可按 F1 查看完整摘要。若确认前目标文件被外部修改，将更新摘要并要求再次确认；候选范围或导出配置改变后，需要重新选择目标。
+
+例如在默认目录保存为 `trial_A.seq`，输出为：
 
 ```text
 clips/trial_A.seq
