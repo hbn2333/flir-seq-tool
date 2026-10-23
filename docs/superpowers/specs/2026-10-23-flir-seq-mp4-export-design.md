@@ -67,4 +67,4 @@ MP4 不生成 selection 配套文件，不修改现有 schema。源大小及 mti
 
 ## 审核状态
 
-用户于 2026-10-23 确认书面设计，包含交互、画面、范围、倍率、时间映射、分辨率和实现边界。实施计划见 `../plans/2026-10-23-flir-seq-mp4-export.md`；功能已实现，自动回归通过，用户人工验收待完成。证据见 `../plans/2026-10-23-flir-seq-mp4-export-execution.md`。
+用户于 2026-10-23 确认书面设计，包含交互、画面、范围、倍率、时间映射、分辨率和实现边界。实施计划见 `../plans/2026-10-23-flir-seq-mp4-export.md`；功能已实现，自动回归通过，用户认可导出效果并授权发布，现已合并 main 并推送 GitHub。证据及人工验收范围见 `../plans/2026-10-23-flir-seq-mp4-export-execution.md`。
