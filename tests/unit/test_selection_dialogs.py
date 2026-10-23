@@ -180,3 +180,40 @@ def test_analysis_export_dialog_normalizes_suffix_and_preserves_parent_lifecycle
         SelectionDialogs().choose_analysis_export(kind, tmp_path, "result")
     behavior.value = ""
     assert SelectionDialogs().choose_analysis_export(kind, tmp_path, "result") is None
+
+
+@pytest.mark.parametrize('value, expected', [('', None), ('demo', Path('demo.mp4')),
+    ('demo.MP4', Path('demo.MP4'))])
+def test_normalize_video_path(value, expected):
+    from flir_seq_tool.selection_dialogs import normalize_video_path
+    assert normalize_video_path(value) == expected
+
+
+@pytest.mark.parametrize('value', ['demo.seq', 'demo.', 'demo ', 'CON.mp4'])
+def test_invalid_video_path(value):
+    from flir_seq_tool.selection_dialogs import normalize_video_path
+    with pytest.raises(ValueError):
+        normalize_video_path(value)
+
+
+def test_video_save_as(fake_tk, tmp_path):
+    from flir_seq_tool.selection_dialogs import SelectionDialogs
+    roots, calls, behavior, _, _ = fake_tk
+    behavior.value = str(tmp_path / 'movie')
+    assert SelectionDialogs().choose_video_export(tmp_path, 'suggested.mp4') == tmp_path / 'movie.mp4'
+    assert calls[0]['confirmoverwrite'] is False
+    assert calls[0]['initialfile'] == 'suggested.mp4'
+    assert roots[0].destroyed
+
+
+def test_video_speed_parent_and_cancel(fake_tk, monkeypatch):
+    import flir_seq_tool.selection_dialogs as module
+    roots, _, _, _, _ = fake_tk
+    monkeypatch.setattr(module, '_speed_dialog', lambda tk, parent: 5)
+    assert module.SelectionDialogs().choose_video_speed() == 5
+    assert roots[0].destroyed
+    monkeypatch.setattr(module, '_speed_dialog', lambda tk, parent: None)
+    assert module.SelectionDialogs().choose_video_speed() is None
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with pytest.raises(RuntimeError, match='main thread'):
+            executor.submit(module.SelectionDialogs().choose_video_speed).result()

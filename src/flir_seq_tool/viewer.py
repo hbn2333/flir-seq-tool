@@ -50,6 +50,8 @@ from .viewer_layout import (BoundedMessage, NORMAL_RECTS, NAV_RECTS, MEASURE_IMA
                             MEASURE_COLORBAR_RECT, MEASURE_CURRENT_RECT, MEASURE_RESULT_RECT,
                             MEASURE_CURVE_DELTA_RECT, label_above)
 from .viewer_pages import PageCoordinator, PageGroup
+from .video_controller import VideoController
+from .video_export import VideoJob
 
 
 WORKSPACE_ROOT = Path(r"D:\carbonfoam\infrared")
@@ -492,6 +494,9 @@ class ViewerUI:
     analysis_state: ViewerAnalysisState
     poll_analysis: Callable[[], None]
     shutdown_analysis: Callable[..., None]
+    video_button: Button
+    video_controller: VideoController
+    poll_video: Callable[[], None]
 
     @property
     def analysis_job(self):
@@ -525,6 +530,7 @@ def launch_viewer(
         try:
             plt.show()
         finally:
+            ui.video_controller.close()
             ui.shutdown_analysis(wait=True)
 
 
@@ -535,6 +541,7 @@ def build_viewer(
     export_job_factory: Callable[[ExportRequest], Any] = ExportJob,
     dialogs: SelectionDialogs | None = None,
     analysis_job_factory: Callable[[AnalysisRequest], Any] = AnalysisJob,
+    video_job_factory: Callable = VideoJob,
 ) -> ViewerUI:
     frame = session.frame_at_local(initial_frame)
     current_frame = frame
@@ -587,6 +594,7 @@ def build_viewer(
     load_axes = figure.add_axes(NORMAL_RECTS["load"])
     edit_transform_axes = figure.add_axes(NORMAL_RECTS["edit"])
     export_axes = figure.add_axes(NORMAL_RECTS["export"])
+    video_axes = figure.add_axes(NORMAL_RECTS["video"])
     cancel_axes = figure.add_axes(NORMAL_RECTS["cancel"])
     slider_max = max(1, session.reader.num_frames - 1)
     slider = Slider(
@@ -624,6 +632,7 @@ def build_viewer(
     load_button = Button(load_axes, "Load selection")
     edit_transform_button = Button(edit_transform_axes, "Edit transform")
     export_button = Button(export_axes, "Export sub-SEQ")
+    video_button = Button(video_axes, "Export MP4")
     cancel_button = Button(cancel_axes, "Cancel export")
     cancel_button.set_active(False)
     message_details: dict[str, str] = {}
@@ -654,6 +663,7 @@ def build_viewer(
         load_axes,
         edit_transform_axes,
         export_axes,
+        video_axes,
         cancel_axes,
     )
 
@@ -969,7 +979,7 @@ def build_viewer(
         # stop Matplotlib widgets from grabbing mouse input in the other mode.
         for control in (
             start_box, end_box, confirm_button, reset_button, save_button,
-            load_button, edit_transform_button, export_button,
+            load_button, edit_transform_button, export_button, video_button,
         ):
             control.set_active(visible)
         range_slider.set_active(visible and session.timeline.local_num_frames > 1)
@@ -1120,6 +1130,9 @@ def build_viewer(
         poll_export()
 
     def on_cancel(_event: Any) -> None:
+        if pages.busy == "video_export":
+            video_controller.cancel()
+            return
         if mode_state.editing_transform:
             set_error("Cannot cancel export while editing transform")
             return
@@ -1133,7 +1146,7 @@ def build_viewer(
         figure.canvas.draw_idle()
 
     def poll_export() -> None:
-        if pages.busy in ("analysis", "analysis_export"):
+        if pages.busy in ("analysis", "analysis_export", "video_export"):
             return
         job = export_state.job
         if job is None:
@@ -1167,6 +1180,8 @@ def build_viewer(
         figure.canvas.draw_idle()
 
     def on_close(_event: Any) -> None:
+        video_timer.stop()
+        video_controller.close()
         shutdown_analysis(wait=False)
         pages.dispose()
         measure_panel.dispose()
@@ -1394,7 +1409,7 @@ def build_viewer(
 
     process_widgets = (range_slider, start_box, end_box, confirm_button, reset_button,
                        save_button, load_button, edit_transform_button,
-                       export_button, cancel_button)
+                       export_button, video_button, cancel_button)
     def process_availability(widget) -> bool:
         if mode_state.editing_transform:
             return False
@@ -1408,9 +1423,10 @@ def build_viewer(
         "process": PageGroup(normal_control_axes, process_widgets, texts=(export_text,),
                              available=process_availability,
                              available_during_busy=lambda widget, kind: (
-                                 widget is cancel_button and kind == "native_export"
+                                 widget is cancel_button and ((kind == "native_export"
                                  and export_state.job is not None and export_state.job.is_alive()
-                                 and export_state.job.progress.snapshot().cancel_allowed)),
+                                 and export_state.job.progress.snapshot().cancel_allowed)
+                                 or (kind == "video_export" and video_controller.cancel_allowed)))),
         "measure": PageGroup((measure_placeholder, measure_delta_axes, current_frame_box.ax),
                              (current_frame_box,), available=lambda widget: session.timeline.local_num_frames > 1,
                              on_visibility=measure_panel.set_visible),
@@ -1451,6 +1467,40 @@ def build_viewer(
         if measure and session.selection_source_range("process") != session.measure_source_range():
             set_error("Using confirmed range; the Process candidate range is not applied", error=False)
     pages.on_refresh = refresh_page
+
+    def video_busy(busy):
+        pages.set_busy("video_export" if busy else None)
+        if busy:
+            progress_text.set_text("")
+        figure.canvas.draw_idle()
+
+    def video_message(message):
+        export_text.set_text(message)
+        figure.canvas.draw_idle()
+
+    video_controller = VideoController(session, dialogs, Path(clips_root), video_job_factory,
+        on_busy=video_busy, on_message=video_message)
+    video_timer = figure.canvas.new_timer(interval=100)
+
+    def poll_video():
+        video_controller.poll()
+        if pages.busy == "video_export":
+            cancel_button.set_active(video_controller.cancel_allowed)
+        if video_controller.job is None:
+            video_timer.stop()
+
+    video_timer.add_callback(poll_video)
+
+    def on_video(_event):
+        if mode_state.editing_transform or not process_input_available():
+            return
+        invalidate_export_confirmation()
+        video_controller.start()
+        if video_controller.job is not None:
+            video_timer.start()
+            pages.refresh()
+
+    video_button.on_clicked(on_video)
     process_button.on_clicked(lambda event: pages.switch("process"))
     measure_button.on_clicked(lambda event: pages.switch("measure"))
 
@@ -1512,6 +1562,9 @@ def build_viewer(
         analysis_state=analysis_state,
         poll_analysis=poll_analysis,
         shutdown_analysis=shutdown_analysis,
+        video_button=video_button,
+        video_controller=video_controller,
+        poll_video=poll_video,
     )
 
 

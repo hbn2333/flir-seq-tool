@@ -83,7 +83,7 @@ class PageCoordinator:
         return True
 
     def set_busy(self, kind: str | None) -> None:
-        if kind not in (None, "analysis", "native_export", "analysis_export"):
+        if kind not in (None, "analysis", "native_export", "analysis_export", "video_export"):
             raise ValueError("unknown busy task")
         self.busy = kind
         self.refresh()

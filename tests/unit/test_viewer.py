@@ -87,6 +87,37 @@ class FakeSelectionDialogs:
         self.details.append(message)
 
 
+def test_mp4_confirmed_range_busy_cancel_and_close(tmp_path):
+    from types import SimpleNamespace
+    from test_video_controller import FakeJob
+    dialogs = FakeSelectionDialogs()
+    dialogs.choose_video_speed = lambda: 5
+    dialogs.choose_video_export = lambda folder, name: tmp_path / name
+    session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / 's.seq'))
+    ui = build_viewer(session, dialogs=dialogs, video_job_factory=FakeJob)
+    try:
+        ui.range_slider.set_val((1, 3))
+        ui.video_button._observers.process('clicked', None)
+        job = ui.video_controller.job
+        assert (job.request.start_frame, job.request.end_frame) == (0, 4)
+        assert ui.pages.busy == 'video_export'
+        assert not ui.slider.active and not ui.confirm_button.active
+        assert not ui.pages.switch('measure')
+        assert ui.cancel_button.active
+        ui.cancel_button._observers.process('clicked', None)
+        assert job.cancelled
+        job.events = [dict(kind='result', status='cancelled', message='cancelled')]
+        ui.poll_video()
+        assert ui.pages.busy is None and ui.video_button.active
+        ui.edit_transform_button._observers.process('clicked', None)
+        assert not ui.video_button.active and not ui.video_button.ax.get_visible()
+        ui.video_button._observers.process('clicked', None)
+        assert ui.video_controller.job is None
+    finally:
+        ui.figure.canvas.callbacks.process('close_event', CloseEvent('close_event', ui.figure.canvas))
+        plt.close(ui.figure)
+
+
 def test_measure_scope_ignores_pending_range():
     session = ViewerSession(FakeTemperatureReader(make_frames(5)))
     session.timeline.set_pending(1, 3)
@@ -1115,6 +1146,11 @@ def test_launch_viewer_keeps_ui_alive_while_event_loop_runs(monkeypatch, tmp_pat
             return None
 
     class ViewerToken:
+        class video_controller:
+            @staticmethod
+            def close():
+                pass
+
         def shutdown_analysis(self, *, wait=False):
             shutdown_calls.append(wait)
 

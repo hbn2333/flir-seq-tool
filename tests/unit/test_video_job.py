@@ -1,0 +1,103 @@
+import importlib
+import multiprocessing
+import queue
+import sys
+import time
+import os
+import subprocess
+
+import pytest
+
+from flir_seq_tool.video_export import VideoJob
+
+
+def test_main_module_is_import_safe():
+    sys.modules.pop('flir_seq_tool.__main__', None)
+    importlib.import_module('flir_seq_tool.__main__')
+
+
+def waiting_worker(request, messages, commands, cancel, gate, publishing, publish_lock):
+    gate.wait()
+    messages.put({'kind': 'ready', 'summary': 'ready'})
+    while not cancel.wait(.02):
+        pass
+    messages.put({'kind': 'result', 'status': 'cancelled', 'message': 'cancelled'})
+
+
+def crashed_worker(request, messages, commands, cancel, gate, publishing, publish_lock):
+    gate.wait()
+    raise RuntimeError('intentional worker failure')
+
+
+def test_spawn_cancel_and_resource_cleanup():
+    job = VideoJob(None, worker=waiting_worker)
+    job.start()
+    deadline = time.monotonic() + 10
+    ready = False
+    while time.monotonic() < deadline and not ready:
+        ready = any(m['kind'] == 'ready' for m in job.poll())
+        time.sleep(.02)
+    assert ready
+    assert job.cancel()
+    while time.monotonic() < deadline and job.is_alive():
+        job.poll()
+        time.sleep(.02)
+    messages = job.poll()
+    assert job.result['status'] == 'cancelled'
+    job.close()
+    assert not job.is_alive()
+
+
+def test_worker_crash_gets_result():
+    job = VideoJob(None, worker=crashed_worker)
+    job.start()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and job.result is None:
+        job.poll()
+        time.sleep(.02)
+    assert job.result['status'] == 'failed'
+    job.close()
+
+
+def hung_worker(request, messages, commands, cancel, gate, publishing, publish_lock):
+    gate.wait()
+    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],
+        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    messages.put(dict(kind='ready', pid=child.pid))
+    time.sleep(60)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows Job Object ownership')
+def test_force_cancel_reaps_worker_and_its_encoder():
+    import ctypes
+    from ctypes import wintypes
+    job = VideoJob(None, worker=hung_worker)
+    job.start()
+    handle = None
+    try:
+        deadline = time.monotonic() + 10
+        pid = None
+        while pid is None and time.monotonic() < deadline:
+            for event in job.poll():
+                if event['kind'] == 'ready':
+                    pid = event['pid']
+            time.sleep(.02)
+        assert pid is not None
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+        handle = kernel.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE only
+        assert handle
+        assert job.cancel()
+        while job.result is None and time.monotonic() < deadline:
+            job.poll()
+            time.sleep(.02)
+        assert job.result['status'] == 'cancelled'
+        assert not job.is_alive()
+        assert kernel.WaitForSingleObject(handle, 2000) == 0
+    finally:
+        job.close()
+        if handle:
+            kernel.CloseHandle(handle)

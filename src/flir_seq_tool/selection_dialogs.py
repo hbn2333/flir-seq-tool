@@ -4,6 +4,36 @@ from pathlib import Path
 import threading
 
 
+def normalize_video_path(value: str) -> Path | None:
+    if not value:
+        return None
+    path = Path(value)
+    if (not path.name or path.name.endswith((".", " "))
+            or (path.suffix and path.suffix.lower() != ".mp4")):
+        raise ValueError("Use a .mp4 filename")
+    from .extraction import normalize_clip_name
+    # Reuse Windows base-name validation without imposing the SEQ suffix.
+    normalize_clip_name(path.stem + ".seq")
+    return path if path.suffix else path.with_suffix(".mp4")
+
+
+def _speed_dialog(tk, parent):
+    from tkinter import simpledialog
+
+    class SpeedDialog(simpledialog.Dialog):
+        def body(self, master):
+            self.speed = tk.IntVar(master, value=1)
+            tk.Label(master, text="Playback speed").pack(anchor="w", padx=12, pady=6)
+            for value in (1, 2, 5, 10):
+                tk.Radiobutton(master, text=f"{value}×", variable=self.speed,
+                    value=value).pack(anchor="w", padx=12)
+
+        def apply(self):
+            self.result = self.speed.get()
+
+    return SpeedDialog(parent, title="Export MP4").result
+
+
 def normalize_selection_path(value: str) -> Path | None:
     if not value:
         return None
@@ -60,6 +90,8 @@ class SelectionDialogs:
                 owned = tk.Tk()
                 owned.withdraw()
                 parent = owned
+            if group == "speed":
+                return _speed_dialog(tk, parent)
             module = filedialog if group == "file" else messagebox
             return getattr(module, operation)(parent=parent, **kwargs)
         except tk.TclError as exc:
@@ -87,6 +119,15 @@ class SelectionDialogs:
             filetypes=[("FLIR SEQ", "*.seq")], confirmoverwrite=False,
         )
         return normalize_seq_path(value)
+
+    def choose_video_speed(self) -> int | None:
+        return self._run("speed", "choose")
+
+    def choose_video_export(self, initial_dir: Path, suggested_name: str) -> Path | None:
+        value = self._run("file", "asksaveasfilename", title="Export MP4",
+            initialdir=str(initial_dir), initialfile=suggested_name,
+            filetypes=[("MP4 video", "*.mp4")], confirmoverwrite=False)
+        return normalize_video_path(value)
 
     def choose_load(self, initial_dir: Path) -> Path | None:
         value = self._run(
