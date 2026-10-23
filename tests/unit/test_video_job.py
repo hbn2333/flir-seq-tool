@@ -5,6 +5,8 @@ import sys
 import time
 import os
 import subprocess
+import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -101,3 +103,76 @@ def test_force_cancel_reaps_worker_and_its_encoder():
         job.close()
         if handle:
             kernel.CloseHandle(handle)
+
+
+def test_exit_race_drains_result_after_worker_is_observed_dead():
+    job = VideoJob(None)
+    job.messages.close()
+    messages = queue.Queue()
+    job.messages = messages
+    def observe_death():
+        messages.put(dict(kind='result', status='succeeded', message='done'))
+        return False
+    job.process = SimpleNamespace(is_alive=observe_death, exitcode=0)
+    job.started = True
+    events = job.poll()
+    assert job.result['status'] == 'succeeded'
+    assert [event['status'] for event in events if event['kind'] == 'result'] == ['succeeded']
+    job.commands.close()
+
+
+def test_required_control_survives_queue_backpressure():
+    from flir_seq_tool.video_export import send_control
+    messages = queue.Queue(maxsize=1)
+    messages.put(dict(kind='progress'))
+    result = dict(kind='result', status='succeeded')
+    done = threading.Event()
+    def send():
+        send_control(messages, result, threading.Event())
+        done.set()
+    thread = threading.Thread(target=send, daemon=True)
+    thread.start()
+    assert not done.wait(.1)
+    assert messages.get()['kind'] == 'progress'
+    assert done.wait(1)
+    assert messages.get() == result
+    thread.join(timeout=1)
+
+
+def held_event_worker(request, messages, commands, cancel, gate, publishing, publish_lock):
+    gate.wait()
+    messages.put(dict(kind='ready'))
+    cancel.wait()
+    # Model termination inside Event.is_set(): this condition is not robust
+    # against the owning process being killed while it holds the lock.
+    with cancel._cond:
+        messages.put(dict(kind='progress', stage='holding-event-lock'))
+        time.sleep(60)
+
+
+def test_force_cancel_does_not_read_abandoned_event_lock():
+    job = VideoJob(None, worker=held_event_worker)
+    job.start()
+    observer = None
+    try:
+        deadline = time.monotonic() + 10
+        locked = False
+        while time.monotonic() < deadline and not locked:
+            for event in job.poll():
+                if event['kind'] == 'ready':
+                    job.cancel()
+                if event.get('stage') == 'holding-event-lock':
+                    locked = True
+            time.sleep(.01)
+        assert locked
+        job.cancel_time = time.monotonic() - 6
+        observer = threading.Thread(target=job.poll, daemon=True)
+        observer.start()
+        observer.join(timeout=3)
+        assert not observer.is_alive(), 'poll blocked on an Event lock abandoned by terminated worker'
+        assert job.result['status'] == 'cancelled'
+        job.close()
+    finally:
+        if observer is not None and observer.is_alive():
+            job.started = False  # Let the pre-fix failing test clean parent handles.
+        job.close()

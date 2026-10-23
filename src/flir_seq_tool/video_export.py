@@ -70,6 +70,19 @@ def _reader_identity(reader):
         reader.timestamp_at(0), reader.timestamp_at(reader.num_frames - 1))
 
 
+def send_control(messages, event, cancel):
+    """Control events wait for the consumer; only progress may be discarded."""
+    from .video_encoder import check_cancel
+    while True:
+        if event['kind'] == 'ready':
+            check_cancel(cancel)
+        try:
+            messages.put(event, timeout=.1)
+            return
+        except queue.Full:
+            continue
+
+
 def _video_worker(request, messages, commands, cancel, gate, publishing, publish_lock):
     # Heavy imports and SDK initialization belong to the isolated worker.
     from .reader import ScienceFileReader
@@ -83,7 +96,7 @@ def _video_worker(request, messages, commands, cancel, gate, publishing, publish
     last_progress = 0.0
 
     def send(kind, **data):
-        messages.put(dict(kind=kind, **data), timeout=3)
+        send_control(messages, dict(kind=kind, **data), cancel)
 
     def progress(stage, current=0, total=0):
         nonlocal last_progress
@@ -226,6 +239,10 @@ class VideoJob:
         self.confirmed = True
 
     def cancel(self):
+        if not self.is_alive():
+            return False
+        if self.cancel_time is not None:
+            return True
         if not self.publish_lock.acquire(block=False):
             return False
         try:
@@ -262,9 +279,21 @@ class VideoJob:
             if event['kind'] == 'result':
                 self.result = event
         if self.started and not self.process.is_alive():
-            # A dead worker has flushed its Queue feeder before normal exit.
+            # Exit may occur after the first empty read. Once death is observed,
+            # normal exit has flushed the feeder, so drain again before deciding
+            # the terminal event is missing.
+            while True:
+                try:
+                    event = self.messages.get_nowait()
+                except queue.Empty:
+                    break
+                events.append(event)
+                if event['kind'] == 'result':
+                    self.result = event
             if self.result is None:
-                cancelled = self.cancel_event.is_set()
+                # A killed worker can leave the Event's internal lock held.
+                # Parent state is sufficient and remains readable after death.
+                cancelled = self.cancel_time is not None
                 self.result = dict(kind='result', status='cancelled' if cancelled else 'failed',
                     message=("MP4 export cancelled; unresponsive worker stopped" if cancelled else
                              f"MP4 worker exited without a result ({self.process.exitcode})"))
@@ -285,7 +314,7 @@ class VideoJob:
     def close(self):
         if self.closed:
             return
-        if self.started:
+        if self.is_alive():
             self.cancel()
             self.process.join(timeout=1)
         self._stop_process()
