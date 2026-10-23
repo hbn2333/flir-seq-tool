@@ -12,7 +12,8 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
 from matplotlib.text import Text
-from matplotlib.widgets import Button, RangeSlider, Slider, TextBox
+from .viewer_theme import (ThemedButton as Button, ThemedRangeSlider as RangeSlider,
+    ThemedSlider as Slider, ThemedTextBox as TextBox, ViewerTheme, style_plot, MUTED)
 
 from .color_scale import ColorLimits, compute_color_limits
 from .frame_cache import FrameCache
@@ -551,6 +552,8 @@ def build_viewer(
 
     clips_root = clips_root or (WORKSPACE_ROOT / "clips")
     figure, axes = plt.subplots(figsize=(12, 10))
+    theme = ViewerTheme(figure)
+    figure.canvas.manager.set_window_title("FLIR SEQ Tool")
     if dialogs is None:
         dialogs = SelectionDialogs(getattr(figure.canvas.manager, "window", None))
     figure.subplots_adjust(bottom=0.56, right=0.87, top=0.90)
@@ -616,7 +619,7 @@ def build_viewer(
         valfmt="%0.0f",
     )
     start_box = TextBox(start_axes, "Start frame", initial="0")
-    current_frame_box = TextBox(figure.add_axes((.64, .535, .05, .025)), "Frame", initial=str(initial_frame))
+    current_frame_box = TextBox(figure.add_axes((.64, .535, .04, .025)), "Frame", initial=str(initial_frame))
     label_above(current_frame_box)
     current_frame_box.label.set_fontsize(8)
     current_frame_box.text_disp.set_clip_on(True)
@@ -626,7 +629,7 @@ def build_viewer(
         "End frame",
         initial=str(session.timeline.local_num_frames - 1),
     )
-    confirm_button = Button(confirm_axes, "Confirm range")
+    confirm_button = Button(confirm_axes, "Confirm range", role="primary")
     reset_button = Button(reset_axes, "Reset full")
     save_button = Button(save_axes, "Save selection")
     load_button = Button(load_axes, "Load selection")
@@ -1434,6 +1437,7 @@ def build_viewer(
 
     def refresh_page(page: str) -> None:
         measure = page == "measure"
+        theme.show_page(page, editing=mode_state.editing_transform)
         measure_panel.set_busy(pages.busy is not None)
         measure_panel.cancel_button.set_active(pages.busy == "analysis" and analysis_state.job is not None
                                               and analysis_state.job.is_alive())
@@ -1460,8 +1464,8 @@ def build_viewer(
         nav_active = pages.busy is None and not mode_state.editing_transform
         process_button.set_active(nav_active)
         measure_button.set_active(nav_active)
-        process_button.label.set_weight("bold" if not measure else "normal")
-        measure_button.label.set_weight("bold" if measure else "normal")
+        process_button.set_selected(not measure)
+        measure_button.set_selected(measure)
         source_name = Path(getattr(session.reader, "path", "SEQ")).name
         page_title.set_text(f"{source_name[:38]} | work {session.timeline.source_start}–{session.timeline.source_end}")
         if measure and session.selection_source_range("process") != session.measure_source_range():
@@ -1523,6 +1527,12 @@ def build_viewer(
     export_state.timer.add_callback(poll_export)
     analysis_state.timer = figure.canvas.new_timer(interval=100)
     analysis_state.timer.add_callback(poll_analysis)
+    theme.style_figure_text(figure)
+    page_title.set_color(MUTED)
+    style_plot(axes)
+    style_plot(colorbar.ax)
+    process_button.label.set_fontsize(10)
+    measure_button.label.set_fontsize(10)
     sync_all_controls()
     show_local(initial_frame)
 

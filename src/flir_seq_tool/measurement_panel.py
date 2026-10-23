@@ -4,7 +4,8 @@ from dataclasses import replace
 from uuid import uuid4
 
 from matplotlib.patches import Rectangle
-from matplotlib.widgets import Button, CheckButtons, RectangleSelector, TextBox
+from matplotlib.widgets import CheckButtons, RectangleSelector
+from .viewer_theme import ThemedButton as Button, ThemedTextBox as TextBox, style_plot, style_border
 
 from .measurement_models import CurrentAnalysis, MeasurementSettings, Roi
 from .measurement_stats import histogram, profile, summarize
@@ -71,8 +72,8 @@ class MeasurePanel:
             self.row_checks.append(checkbox)
         self.previous_button = Button(axes((.695, .736, .118, .025)), "Previous")
         self.next_button = Button(axes((.830, .736, .122, .025)), "Next")
-        self.add_button = Button(axes((.695, .696, .118, .027)), "Add ROI")
-        self.delete_button = Button(axes((.830, .696, .122, .027)), "Delete")
+        self.add_button = Button(axes((.695, .696, .118, .027)), "Add ROI", role="primary")
+        self.delete_button = Button(axes((.830, .696, .122, .027)), "Delete", role="danger")
         self.name_box = TextBox(axes((.695, .645, .257, .027)), "Name", initial="")
         self.name_box.text_disp.set_parse_math(False)
         self.name_box.text_disp.set_clip_on(True)
@@ -95,7 +96,7 @@ class MeasurePanel:
         self.mean_button = Button(axes((.46, .482, .085, .026)), "Mean")
         self.min_button = Button(axes((.555, .482, .085, .026)), "Min")
         self.max_button = Button(axes((.65, .482, .085, .026)), "Max")
-        self.calculate_button = Button(axes((.75, .482, .105, .026)), "Calculate")
+        self.calculate_button = Button(axes((.75, .482, .105, .026)), "Calculate", role="primary")
         self.cancel_button = Button(axes((.865, .482, .085, .026)), "Cancel")
         self.save_setup_button = Button(axes((.15, .16, .17, .027)), "Save setup")
         self.export_csv_button = Button(axes((.35, .16, .17, .027)), "Export CSV")
@@ -402,6 +403,9 @@ class MeasurePanel:
                 draw_distribution(ax, analysis.histogram)
             else:
                 draw_profile(ax, getattr(analysis, self.state.settings.profile_direction))
+            for result_ax in (ax, self.delta_axes):
+                if result_ax is not None:
+                    style_plot(result_ax)
         self.figure.canvas.draw_idle()
 
     def _sync_analysis_controls(self):
@@ -426,7 +430,7 @@ class MeasurePanel:
                                   (self.profile_button, settings.frame_view == "profile"),
                                   (self.horizontal_button, settings.profile_direction == "horizontal"),
                                   (self.vertical_button, settings.profile_direction == "vertical")):
-            button.label.set_weight("bold" if selected else "normal")
+            button.set_selected(selected)
         for button in self.curve_controls:
             visible = self.visible and settings.result_view == "curves"
             button.ax.set_visible(visible)
@@ -435,7 +439,7 @@ class MeasurePanel:
                                           and not self.busy and not self.adding and bool(settings.rois))
         self.cancel_button.set_active(self.visible and settings.result_view == "curves" and self.busy)
         for button, value in ((self.mean_button, "mean"), (self.min_button, "min"), (self.max_button, "max")):
-            button.label.set_weight("bold" if settings.curve_metric == value else "normal")
+            button.set_selected(settings.curve_metric == value)
 
     def _on_key(self, event):
         if self._can_edit() and event.key == "escape" and self.adding:
@@ -477,8 +481,9 @@ class MeasurePanel:
                 roi = self.state.settings.rois[index] if exists else None
                 label = roi.name if roi else ""
                 button.label.set_text(label[:23] + ("…" if len(label) > 23 else ""))
-                button.label.set_color(roi.color if roi else "black")
-                button.label.set_weight("bold" if roi and roi.id == self.state.settings.active_roi_id else "normal")
+                button.set_tint(roi.color if roi else None)
+                button.set_selected(roi is not None and roi.id == self.state.settings.active_roi_id)
+                style_border(checkbox.ax)
                 status = bool(roi and roi.checked)
                 if checkbox.get_status()[0] != status:
                     checkbox.set_active(0)

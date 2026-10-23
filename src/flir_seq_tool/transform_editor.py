@@ -6,7 +6,8 @@ from typing import Callable
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.text import Text
-from matplotlib.widgets import Button, RectangleSelector, Slider, TextBox
+from matplotlib.widgets import RectangleSelector
+from .viewer_theme import ThemedButton as Button, ThemedTextBox as TextBox, ThemedSlider as Slider
 from .viewer_layout import BoundedMessage, EDITOR_RECTS, label_above
 from .pixel_geometry import rect_from_extents
 
@@ -257,7 +258,7 @@ def build_transform_editor(
         label_above(box)
     reset_button = Button(action_axes[1], "Reset")
     cancel_button = Button(action_axes[2], "Cancel")
-    apply_button = Button(action_axes[3], "Apply")
+    apply_button = Button(action_axes[3], "Apply", role="primary")
     details = {} if message_details is None else message_details
     status_text = BoundedMessage(figure, "editor_status", details, max_lines=1, fontsize=9)
     error_text = BoundedMessage(
