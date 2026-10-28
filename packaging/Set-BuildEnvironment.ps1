@@ -16,4 +16,3 @@ $env:XDG_CACHE_HOME = Join-Path $stateRoot 'cache'
 $env:PYTHONDONTWRITEBYTECODE = '1'
 $env:PYTHONNOUSERSITE = '1'
 $env:PYTHONPATH = Join-Path $projectRoot 'src'
-

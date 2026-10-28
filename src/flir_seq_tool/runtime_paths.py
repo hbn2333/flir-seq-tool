@@ -48,4 +48,3 @@ def configure_portable_environment():
     # tempfile caches its first directory; changing TEMP alone does not move it.
     import tempfile
     tempfile.tempdir = str(root / 'cache/tmp')
-
