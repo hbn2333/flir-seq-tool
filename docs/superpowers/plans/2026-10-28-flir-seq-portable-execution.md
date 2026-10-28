@@ -38,4 +38,6 @@
 
 交付构建为 `dist/portable/preview-20261028-r5/`，内含完整目录、ZIP 和 SHA256，构建产物保持 Git 忽略。早期试构建保留在各自目录供追溯，不覆盖已有验收结果。
 
+最终 r5 以提交 `0949dac` 的干净源码构建，复制到 `.packaging/acceptance-r5 中文 路径` 后重做上述八项冻结诊断，全部通过，退出码 0。ZIP 经完整 CRC 检查，SHA256 为 `4a5bb68783ee4636d9b86d1bee4c8640fef50e20feceeda6d397a4b01646aa11`；详情保存在该验收目录的 `acceptance.json` 和项目 `.packaging/build-r5.log`。
+
 SDK 安装包 EULA 与附带技术分发说明的歧义尚未解决；FFmpeg 对应源码及其他第三方运行库的完整发行材料仍需确认。当前只能作为本机验收包，不应公开上传或向他人分发。
