@@ -2,9 +2,10 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from .runtime_paths import application_root
 
 
-DEFAULT_RAW_ROOT = Path(r"D:\carbonfoam\infrared\raw")
+DEFAULT_RAW_ROOT = application_root() / 'raw'
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,9 @@ def validate_write_path(path: Path, *, source_path: Path, raw_root: Path) -> Pat
     target = Path(path).resolve()
     source = Path(source_path).resolve()
     protected = Path(raw_root).resolve()
-    if target == source or target.is_relative_to(protected):
+    source_raw = next((parent for parent in source.parents if parent.name.lower() == 'raw'), None)
+    if (target == source or target.is_relative_to(protected)
+            or (source_raw is not None and target.is_relative_to(source_raw))):
         raise ValueError(f"protected output path: {path}")
     if target.exists() and source.exists() and target.samefile(source):
         raise ValueError(f"output aliases source: {path}")

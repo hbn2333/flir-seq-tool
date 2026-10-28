@@ -18,7 +18,7 @@ import fnv.file
 import numpy as np
 
 from .reader import ScienceFileReader
-from .file_safety import TargetSnapshot, validate_write_path, assert_snapshot
+from .file_safety import TargetSnapshot, validate_write_path, assert_snapshot, DEFAULT_RAW_ROOT
 from .selection import SelectionDocument, SelectionStore, validate_source_identity
 from .export_bundle import (
     sidecar_path, pending_path, build_clip_document, read_seq_identity,
@@ -36,7 +36,6 @@ _RESERVED_WINDOWS_NAMES = {
     *(f"LPT{index}" for index in range(1, 10)),
 }
 _MIN_SPACE_MARGIN = 64 * 1024 * 1024
-DEFAULT_RAW_ROOT = Path(r"D:\carbonfoam\infrared\raw")
 
 
 def normalize_clip_name(name: str) -> str:

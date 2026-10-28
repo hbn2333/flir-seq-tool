@@ -1,6 +1,7 @@
 """Bounded-memory FFmpeg pipes with cancellation and full-frame verification."""
 
 import os
+from functools import lru_cache
 from pathlib import Path
 import re
 import shutil
@@ -10,6 +11,7 @@ import threading
 import numpy as np
 
 from .video_renderer import VIDEO_HEIGHT, VIDEO_WIDTH
+from .runtime_paths import bundled_ffmpeg, is_frozen
 
 
 class VideoCancelled(Exception):
@@ -26,11 +28,11 @@ def _flags():
 
 
 def discover_encoder():
-    executable = shutil.which("ffmpeg")
+    executable = bundled_ffmpeg() or (None if is_frozen() else shutil.which("ffmpeg"))
     if not executable:
-        raise RuntimeError("FFmpeg not found on PATH; install FFmpeg with libx264 to export MP4")
+        raise RuntimeError("FFmpeg not found; the portable package needs tools/ffmpeg.exe with libx264")
     try:
-        result = subprocess.run([executable, "-hide_banner", "-encoders"],
+        result = subprocess.run([str(executable), "-hide_banner", "-encoders"],
             capture_output=True, timeout=10, creationflags=_flags(), shell=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError(f"FFmpeg encoder check failed: {exc}") from exc
@@ -47,6 +49,21 @@ def encode_args(executable, target):
             "-r", "30", "-i", "pipe:0", "-an", "-c:v", "libx264",
             "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
             "-movflags", "+faststart", str(target)]
+
+
+@lru_cache(maxsize=4)
+def decode_sync_args(executable):
+    """Preserve every decoded frame with both old and current FFmpeg builds."""
+    try:
+        result = subprocess.run([str(executable), "-hide_banner", "-h", "full"],
+            capture_output=True, timeout=10, creationflags=_flags(), shell=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"FFmpeg capability check failed: {exc}") from exc
+    if result.returncode:
+        raise RuntimeError("FFmpeg capability check failed")
+    if re.search(rb"(?m)^-fps_mode(?:\[|\s)", result.stdout):
+        return ("-fps_mode", "passthrough")
+    return ("-vsync", "0")
 
 
 def _terminate(process):
@@ -139,7 +156,7 @@ class VideoEncoder:
 def validate_video(executable, target, expected_frames, cancel_event):
     args = [str(executable), "-hide_banner", "-loglevel", "error", "-nostdin", "-xerror",
             "-err_detect", "explode", "-i", str(target), "-map", "0:v:0",
-            "-an", "-sn", "-dn", "-vsync", "0", "-c:v", "rawvideo",
+            "-an", "-sn", "-dn", *decode_sync_args(executable), "-c:v", "rawvideo",
             "-pix_fmt", "rgb24", "-f", "framehash", "pipe:1"]
     pipe = _PipeProcess(args, cancel_event, decoding=True)
     count = 0

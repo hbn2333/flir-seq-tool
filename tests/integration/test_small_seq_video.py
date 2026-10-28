@@ -10,7 +10,7 @@ import pytest
 
 from flir_seq_tool.frame_transformer import FrameTransformer
 from flir_seq_tool.reader import ScienceFileReader
-from flir_seq_tool.video_encoder import discover_encoder, validate_video
+from flir_seq_tool.video_encoder import decode_sync_args, discover_encoder, validate_video
 from flir_seq_tool.video_export import VideoJob, build_video_request
 from flir_seq_tool.video_renderer import VideoRenderer
 from flir_seq_tool.viewer import ViewerSession
@@ -61,7 +61,7 @@ def test_real_seq_video_with_readonly_source_and_last_frame(tmp_path, speed, sin
         assert validate_video(executable, target, expected_count, threading.Event()) == expected_count
         # Decode only the last frame, retaining bounded output even for a longer source.
         decoded = subprocess.run([executable, '-v', 'error', '-i', str(target),
-            '-vf', f'select=eq(n\\,{expected_count - 1})', '-vsync', '0',
+            '-vf', f'select=eq(n\\,{expected_count - 1})', *decode_sync_args(executable),
             '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'], capture_output=True, timeout=15,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), check=True)
         actual = np.frombuffer(decoded.stdout, np.uint8).reshape(1080, 1920, 3)

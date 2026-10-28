@@ -53,9 +53,10 @@ from .viewer_layout import (BoundedMessage, NORMAL_RECTS, NAV_RECTS, MEASURE_IMA
 from .viewer_pages import PageCoordinator, PageGroup
 from .video_controller import VideoController
 from .video_export import VideoJob
+from .runtime_paths import workspace_root
 
 
-WORKSPACE_ROOT = Path(r"D:\carbonfoam\infrared")
+WORKSPACE_ROOT = workspace_root()
 
 
 def _explicit_color_limits(vmin: float | None, vmax: float | None) -> ColorLimits | None:

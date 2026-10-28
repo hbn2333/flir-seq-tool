@@ -29,13 +29,25 @@
 
 已验证环境为 **Windows x64、Python 3.13.5、FLIR Science File SDK 2026.1.2**
 
+### Windows 文件夹便携版（本地验收中）
+
+正在验证 Windows 10/11 x64 的文件夹版：完整解压后双击 `FLIR_SEQ_Tool.exe` 选择 SEQ，也可将一个 SEQ 拖到 EXE 上。包内收集 Python、Tk、科学计算库、SDK 运行库和 FFmpeg，使用者无需安装 Git、Python 或手动配置环境。
+
+默认结果写入软件目录的 `output/clips`、`output/analysis`、`output/selections`；临时文件和日志位于 `cache`、`logs`。整个文件夹应放在有写权限的位置，不能只移动 EXE。原始数据不随包分发。
+
+**目前没有公开的便携版下载。** FLIR SDK 的技术分发说明与安装包通用 EULA 存在许可歧义，公共发行前需取得明确许可，并补齐 FFmpeg 对应源码等材料。当前构建只用于本地验收，请勿转发。详情见 [便携版构建与验收](docs/PORTABLE.md)。
+
+后续如发布 GitHub Release，普通用户应下载附加的便携版 ZIP；GitHub 自动生成的 `Source code.zip` 是源码，仍需按下述流程配置开发环境。
+
+### 从源码安装
+
 ### 1. 准备官方 SDK
 
 需要自行取得并安装 FLIR Science File SDK，以及与 Python 版本和架构匹配的官方 Python wheel（已验证为 CPython 3.13 / x64，即 cp313）。SDK、wheel 和实验 SEQ 不包含在仓库中；请按 FLIR 的许可与安装说明获取和使用。
 
 ### 2. 克隆项目并创建环境
 
-以下命令在 PowerShell 中执行。仓库可以克隆到自己的目录；当前默认输出路径的限制见下方说明。
+以下命令在 PowerShell 中执行，仓库可以克隆到自己的目录。
 
 ```powershell
 git clone https://github.com/hbn2333/flir-seq-tool.git
@@ -65,7 +77,7 @@ NumPy、SciPy 和 Matplotlib 由项目依赖声明安装；官方 SDK 需单独�
 
 导入成功仅说明 Python 模块可用；还需用自己的 SEQ 验证 SDK 读取能力。
 
-> **当前可移植性限制：** 代码中的默认工作根目录仍为 `D:\carbonfoam\infrared`，默认保存位置分别为其 `selections`、`clips` 和 `analysis` 子目录。原生保存框允许另选位置，但没有命令行参数可配置默认根目录。受保护的 raw 目录也仍是该固定路径，不能视为对其他电脑任意 raw 文件夹的自动保护。请主动将输出与原始数据分开，并保留原始数据备份或使用操作系统只读权限。工具会拒绝把当前打开的源文件及其文件别名作为输出目标。
+默认工作根目录按安装位置定位：源码检出中为项目根，便携版中为 EXE 旁的 `output`，不依赖当前终端目录。另存为可选择其他位置。工具保护当前源文件、文件别名、项目 `raw` 以及源文件所在路径的 `raw` 祖先目录；其他任意数据文件夹不会自动全部设为只读。请将输出与原始数据分开，并保留原始数据备份。
 
 ## 快速开始
 
