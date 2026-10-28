@@ -50,7 +50,7 @@ for path in sorted([ROOT / 'pyproject.toml', *ROOT.joinpath('src').rglob('*.py')
                     *(p for p in (ROOT / 'packaging').iterdir() if p.is_file())]):
     with path.open('rb') as stream:
         sources[str(path.relative_to(ROOT))] = hashlib.file_digest(stream, 'sha256').hexdigest()
-manifest = dict(status='local-acceptance-only', components=components,
+manifest = dict(status='preview-redistribution-review-pending', components=components,
     source_commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
     source_dirty=bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT)),
     source_files=sources,

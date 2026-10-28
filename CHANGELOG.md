@@ -1,8 +1,14 @@
 # 版本变更记录
 
-## Unreleased：Process / Measure
+## portable-preview-2026.10.28：Windows 便携预发布
 
-- 增加 Windows x64 文件夹便携版的隔离构建、双击选文件/拖入单个 SEQ、包内输出/缓存/日志及 SDK/FFmpeg 依赖收集；每次构建创建独立目录，拒绝覆盖旧软件包。当前仅本地验收，尚未公开分发。
+- 发布 Windows x64 文件夹 ZIP 与 SHA256，包内收集 Python、SDK、Tk、科学计算库及 FFmpeg；Python 包版本保留 0.1.0。
+- 适用 Windows 10/11 x64；本机迁移诊断通过，独立干净电脑和原生文件框仍待人工验收。
+- SDK 为专有第三方依赖，再分发条款歧义、FFmpeg 对应源码及其他许可材料仍待核实，未宣称已完成许可审核。
+
+## 已集成：Process / Measure
+
+- 增加 Windows x64 文件夹便携版的隔离构建、双击选文件/拖入单个 SEQ、包内输出/缓存/日志及 SDK/FFmpeg 依赖收集；每次构建创建独立目录，拒绝覆盖旧软件包。
 - 默认路径按源码或 EXE 位置定位，保留源文件及其 raw 祖先目录保护；启动早期初始化临时目录，避免分析 SQLite 继续使用已缓存的系统临时路径。
 - MP4 完整解码验证按 FFmpeg 能力选择新版 `fps_mode` 或旧版 `vsync`，兼容便携包内新版编码器。
 

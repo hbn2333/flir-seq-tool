@@ -29,15 +29,17 @@
 
 已验证环境为 **Windows x64、Python 3.13.5、FLIR Science File SDK 2026.1.2**
 
-### Windows 文件夹便携版（本地验收中）
+### Windows 文件夹便携版（预发布）
 
 正在验证 Windows 10/11 x64 的文件夹版：完整解压后双击 `FLIR_SEQ_Tool.exe` 选择 SEQ，也可将一个 SEQ 拖到 EXE 上。包内收集 Python、Tk、科学计算库、SDK 运行库和 FFmpeg，使用者无需安装 Git、Python 或手动配置环境。
 
 默认结果写入软件目录的 `output/clips`、`output/analysis`、`output/selections`；临时文件和日志位于 `cache`、`logs`。整个文件夹应放在有写权限的位置，不能只移动 EXE。原始数据不随包分发。
 
-**目前没有公开的便携版下载。** FLIR SDK 的技术分发说明与安装包通用 EULA 存在许可歧义，公共发行前需取得明确许可，并补齐 FFmpeg 对应源码等材料。当前构建只用于本地验收，请勿转发。详情见 [便携版构建与验收](docs/PORTABLE.md)。
+[下载 Windows x64 便携预览版](https://github.com/hbn2333/flir-seq-tool/releases/tag/portable-preview-2026.10.28)。此版本已做本机迁移测试，尚未在独立干净电脑上验收；双击选文件、取消与拖入文件仍需人工验证。
 
-后续如发布 GitHub Release，普通用户应下载附加的便携版 ZIP；GitHub 自动生成的 `Source code.zip` 是源码，仍需按下述流程配置开发环境。
+FLIR SDK 是专有第三方依赖，仓库公开不代表 SDK 获得开源授权。SDK 再分发条款的歧义、FFmpeg 对应源码及其他发行材料仍待核实，预发布同样受第三方许可约束。详情见 [便携版构建与验收](docs/PORTABLE.md)。
+
+普通用户应下载 Release 附加的便携版 ZIP，并完整解压；GitHub 自动生成的 `Source code.zip` 是源码，仍需按下述流程配置开发环境。
 
 ### 从源码安装
 

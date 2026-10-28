@@ -1,10 +1,12 @@
 # Windows 便携版构建与验收
 
-当前状态：本地验收预览，未公开分发。构建环境、临时文件和软件包都在项目内；既有 Python、SDK、Tecplot 安装只读，不修改系统 PATH 或注册表。
+当前状态：按维护者 2026-10-28 的要求发布 [Windows 便携预览版](https://github.com/hbn2333/flir-seq-tool/releases/tag/portable-preview-2026.10.28)。本机迁移诊断已通过，独立干净电脑和原生文件选择框仍待人工验收。SDK 再分发许可歧义及 FFmpeg 等发行材料尚未核清，公开预发布不表示这些事项已经解决，也不豁免许可义务。
+
+构建环境、临时文件和软件包都在项目内；既有 Python、SDK、Tecplot 安装只读，不修改系统 PATH 或注册表。
 
 ## 普通使用者
 
-取得经过许可确认的完整软件包后，解压到可写目录，双击 `FLIR_SEQ_Tool.exe` 选择 SEQ。取消选择即退出；也支持将一个 SEQ 拖到 EXE。无需 Git 或系统 Python，不能单独复制 EXE。
+从 Release 下载便携 ZIP 后，完整解压到可写目录，双击 `FLIR_SEQ_Tool.exe` 选择 SEQ。取消选择即退出；也支持将一个 SEQ 拖到 EXE。无需 Git 或系统 Python，不能单独复制 EXE。使用第三方 SDK 仍需遵守其原有许可。
 
 ```text
 FLIR_SEQ_Tool/
@@ -33,7 +35,7 @@ FLIR_SEQ_Tool/
 
 脚本只在 `.packaging/venv` 安装锁定依赖，缓存/下载也在 `.packaging`，PyInstaller 中间文件在 `build/portable/<构建号>`，软件包在 `dist/portable/<构建号>/FLIR_SEQ_Tool`。同目录生成便携版 ZIP 和 `.zip.sha256`，逐文件核对清单并完整检查 ZIP。可传 `-BuildId preview-001` 指定构建号；已存在的目标会直接拒绝，避免删除旧版结果。
 
-FFmpeg 使用 Gyan 9.0.2 essentials，下载 SHA256 为 `60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba`。`packaging/requirements-build.lock` 固定构建环境版本；清单另记源码提交、dirty 状态、源码文件及成品 SHA256。VC++ DLL 从已有系统运行库只读复制，仅在本机预览包使用；目标系统仍需 Windows 10/11 自带组件。
+FFmpeg 使用 Gyan 9.0.2 essentials，下载 SHA256 为 `60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba`。`packaging/requirements-build.lock` 固定构建环境版本；清单另记源码提交、dirty 状态、源码文件及成品 SHA256。VC++ DLL 从已有系统运行库只读复制，其发行条件仍在核查；目标系统仍需 Windows 10/11 自带组件。
 
 ## 冻结程序诊断
 
@@ -49,12 +51,12 @@ Start-Process -FilePath ".\dist\portable\<构建号>\FLIR_SEQ_Tool\FLIR_SEQ_Tool
 
 诊断覆盖包内临时目录和 SQLite、Tk、SDK 温度读取、变换/ROI、两页离屏渲染、五帧原生 SEQ、MP4 工作进程/完整解码及编码取消。源码与 EXE 温度统计需比较；还应检查加载 DLL 的绝对路径和 raw 文件大小/mtime。离屏渲染不能代替原生窗口试用；同机清除 PATH 后的迁移测试也不能替代独立干净机器验证。
 
-## 公开发行前
+## 第三方许可待核实事项
 
 SDK 安装包 EULA 限制再分发，而 SDK 附带技术文档又提供运行库分发指引；不能据此自行认定全部运行库已获得公共再分发许可。需取得 FLIR 对适用许可的明确说明，或改为要求使用者自行提供 SDK。
 
 FFmpeg 9.0.2 构建为包含 libx264 的 GPLv3 程序。随包许可文本不等于完成全部义务，仍需整理准确对应的源码、依赖和构建材料。还需核对 Python、Tk、VC++ 等第三方声明与分发条件。
 
-上述事项和独立电脑验收完成后，再决定正式版本号、提交、标签和 GitHub Release。Release 附件可放便携版 ZIP、SHA256 及更新说明；二进制不提交到 Git 源码目录，自动生成的源码压缩包不包含可执行软件包。
+本次使用日期标签 `portable-preview-2026.10.28` 标记便携发行预览，Python 包版本保留 0.1.0。预发布与正式版同样受上述许可条件约束；本次公开不构成第三方授权确认。Release 附件为便携版 ZIP、SHA256 及更新说明；二进制不提交到 Git 源码目录，自动生成的源码压缩包不包含可执行软件包。
 
 依据：[GitHub Release 说明](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)、[FFmpeg 文档](https://ffmpeg.org/ffmpeg.html)、[PyInstaller 使用文档](https://pyinstaller.org/en/stable/usage.html)。SDK 许可依据为本地 2026.1.2 安装包 EULA 及其 `python/doc/_sources/redistribution.rst.txt`，保留原许可文件，不在仓库公开复制其全文。
