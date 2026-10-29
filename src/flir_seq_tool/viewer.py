@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
 from matplotlib.text import Text
 from .viewer_theme import (ThemedButton as Button, ThemedRangeSlider as RangeSlider,
-    ThemedSlider as Slider, ThemedTextBox as TextBox, ViewerTheme, style_plot, MUTED)
+    ThemedSlider as Slider, ThemedTextBox as TextBox, ViewerTheme, style_plot, MUTED, NAV_FONT_SIZE)
 
 from .color_scale import ColorLimits, compute_color_limits
 from .frame_cache import FrameCache
@@ -661,9 +661,9 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         valfmt="%0.0f",
     )
     start_box = TextBox(start_axes, "Start frame", initial="0")
-    current_frame_box = TextBox(figure.add_axes((.64, .535, .04, .025)), "Frame", initial=str(initial_frame))
+    current_frame_box = TextBox(figure.add_axes((.635, .535, .055, .025)), "Frame", initial=str(initial_frame))
     label_above(current_frame_box)
-    current_frame_box.label.set_fontsize(8)
+    current_frame_box.label.set_fontsize(9)
     current_frame_box.text_disp.set_clip_on(True)
     current_frame_box.text_disp.set_clip_path(current_frame_box.ax.patch)
     end_box = TextBox(
@@ -1703,8 +1703,8 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
     page_title.set_color(MUTED)
     style_plot(axes)
     style_plot(colorbar.ax)
-    process_button.label.set_fontsize(10)
-    measure_button.label.set_fontsize(10)
+    process_button.label.set_fontsize(NAV_FONT_SIZE)
+    measure_button.label.set_fontsize(NAV_FONT_SIZE)
     sync_all_controls()
     show_local(initial_frame)
 

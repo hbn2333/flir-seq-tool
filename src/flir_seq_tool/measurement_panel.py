@@ -5,7 +5,8 @@ from uuid import uuid4
 
 from matplotlib.patches import Rectangle
 from matplotlib.widgets import CheckButtons, RectangleSelector
-from .viewer_theme import ThemedButton as Button, ThemedTextBox as TextBox, style_plot, style_border
+from .viewer_theme import (ThemedButton as Button, ThemedTextBox as TextBox, style_plot, style_border,
+                           COMPACT_BUTTON_FONT_SIZE, LABEL_FONT_SIZE)
 
 from .measurement_models import CurrentAnalysis, MeasurementSettings, Roi
 from .height_models import HeightSettings
@@ -77,7 +78,7 @@ class MeasurePanel:
             checkbox = CheckButtons(axes((.695, y, .026, .025)), [""], [False])
             button = Button(axes((.727, y, .225, .025)), "")
             button.label.set_parse_math(False)
-            button.label.set_fontsize(8)
+            button.label.set_fontsize(COMPACT_BUTTON_FONT_SIZE)
             button.on_clicked(lambda event, row=row: self._select_row(row))
             checkbox.on_clicked(lambda label, row=row: self._check_row(row))
             self.row_buttons.append(button)
@@ -94,11 +95,11 @@ class MeasurePanel:
                                for i, name in enumerate(("x", "y", "width", "height"))}
         for box in (self.name_box, *self.geometry_boxes.values()):
             label_above(box)
-            box.label.set_fontsize(8)
-        self.page_text = figure.text(.695, .915, "", fontsize=8, va="top")
+            box.label.set_fontsize(LABEL_FONT_SIZE)
+        self.page_text = figure.text(.695, .915, "", fontsize=9, va="top")
         self.error_text = figure.text(.695, .585, "", color="crimson", fontsize=6.5, va="top")
-        self.stats_text = figure.text(.695, .570, "Add an ROI to inspect temperatures", fontsize=7.5, va="top")
-        self.analysis_note = figure.text(.075, .942, "", fontsize=8, va="top", parse_math=False)
+        self.stats_text = figure.text(.695, .578, "Add an ROI to inspect temperatures", fontsize=8.5, va="top")
+        self.analysis_note = figure.text(.075, .942, "", fontsize=9, va="top", parse_math=False)
         self.current_button = Button(axes((.08, .482, .12, .026)), "Current frame")
         self.curves_button = Button(axes((.21, .482, .12, .026)), "Frame curves")
         self.height_button = Button(axes((.34, .482, .145, .026)), "Height analysis")
@@ -119,11 +120,11 @@ class MeasurePanel:
         for button, kind in ((self.export_csv_button, "csv"), (self.export_png_button, "png")):
             button.on_clicked(lambda event, kind=kind: self.on_export(kind) if self.on_export else None)
         for button in self.output_controls:
-            button.label.set_fontsize(8)
+            button.label.set_fontsize(COMPACT_BUTTON_FONT_SIZE)
         self.curve_controls = (self.mean_button, self.min_button, self.max_button,
                                self.calculate_button, self.cancel_button)
         for button in self.curve_controls:
-            button.label.set_fontsize(8)
+            button.label.set_fontsize(COMPACT_BUTTON_FONT_SIZE)
         for button, value in ((self.mean_button, "mean"), (self.min_button, "min"), (self.max_button, "max")):
             button.on_clicked(lambda event, value=value: self._set_view("curve_metric", value))
         self.calculate_button.on_clicked(lambda event: self.on_calculate() if self.on_calculate else None)
@@ -136,7 +137,7 @@ class MeasurePanel:
             (self.distribution_button, "frame_view", "distribution"), (self.profile_button, "frame_view", "profile"),
             (self.horizontal_button, "profile_direction", "horizontal"), (self.vertical_button, "profile_direction", "vertical"),
         ):
-            button.label.set_fontsize(8)
+            button.label.set_fontsize(COMPACT_BUTTON_FONT_SIZE)
             button.on_clicked(lambda event, field=field, value=value: self._set_view(field, value))
         self.widgets = [*self.row_buttons, *self.row_checks, self.previous_button, self.next_button,
                         self.add_button, self.delete_button, self.name_box, *self.geometry_boxes.values(),

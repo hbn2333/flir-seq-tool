@@ -10,7 +10,8 @@ from matplotlib.widgets import CheckButtons
 
 from .height_models import ZONE_KEYS, height_positions, row_profile, zone_statistics
 from .viewer_layout import label_above
-from .viewer_theme import ThemedButton as Button, ThemedTextBox as TextBox, style_plot
+from .viewer_theme import (ThemedButton as Button, ThemedTextBox as TextBox, style_plot,
+                           COMPACT_BUTTON_FONT_SIZE, INPUT_FONT_SIZE, LABEL_FONT_SIZE)
 
 
 PROFILE_RECT = (.10, .25, .51, .19)
@@ -103,7 +104,7 @@ class HeightPanel:
 
         def button(rect, text, action, **kwargs):
             widget = Button(self._axes(rect), text, **kwargs)
-            widget.label.set_fontsize(7)
+            widget.label.set_fontsize(COMPACT_BUTTON_FONT_SIZE)
             widget.on_clicked(lambda event: action())
             self.widgets.append(widget)
             return widget
@@ -112,18 +113,18 @@ class HeightPanel:
         self.zones_button = button((.595, .482, .08, .026), 'Zones', lambda: self._view('height_view', 'zones'))
         self.px_button = button((.68, .482, .04, .026), 'px', lambda: self._view('height_unit', 'px'))
         self.mm_button = button((.725, .482, .04, .026), 'mm', lambda: self._view('height_unit', 'mm'))
-        self.bottom_button = button((.695, .415, .078, .023), 'Bottom hot', lambda: self._change(heated_edge='bottom'))
-        self.top_button = button((.780, .415, .078, .023), 'Top hot', lambda: self._change(heated_edge='top'))
-        self.clear_button = button((.865, .415, .087, .023), 'Clear mm', self._clear_calibration)
+        self.bottom_button = button((.695, .415, .098, .023), 'Bottom hot', lambda: self._change(heated_edge='bottom'))
+        self.top_button = button((.798, .415, .072, .023), 'Top hot', lambda: self._change(heated_edge='top'))
+        self.clear_button = button((.875, .415, .077, .023), 'Clear mm', self._clear_calibration)
         self.height_mm_box = self._box((.695, .370, .090, .023), 'ROI height mm', self._calibrate)
         self.zones_check = CheckButtons(self._axes((.800, .365, .152, .031)), ['Enable zones'], [False])
-        self.zones_check.labels[0].set_fontsize(7)
+        self.zones_check.labels[0].set_fontsize(LABEL_FONT_SIZE)
         self.zones_check.on_clicked(self._toggle_zones)
         self.widgets.append(self.zones_check)
-        self.zone_name_boxes = tuple(self._box((.695 + i * .088, .325, .081, .022), name,
+        self.zone_name_boxes = tuple(self._box((.695 + i * .088, .320, .081, .022), name,
                                                 lambda text, i=i: self._name(i, text))
                                      for i, name in enumerate(('Low name', 'Middle name', 'High name')))
-        self.cut_boxes = tuple(self._box((.695 + i * .133, .280, .124, .022), name,
+        self.cut_boxes = tuple(self._box((.695 + i * .133, .275, .124, .022), name,
                                          lambda text: self._cuts())
                               for i, name in enumerate(('Low/middle (px)', 'Middle/high (px)')))
         self.pair_a_button = button((.695, .235, .124, .022), 'A: Low', lambda: self._cycle_pair(0))
@@ -132,7 +133,7 @@ class HeightPanel:
         self.export_height_button = button((.24, .16, .30, .027), 'Export full height CSV (all ROIs)',
                                            lambda: self._export('height'), role='primary')
         self.export_zones_button = button((.56, .16, .19, .027), 'Export zones CSV', lambda: self._export('zones'))
-        self.note = self.figure.text(.10, .451, '', fontsize=6.5, va='center', parse_math=False)
+        self.note = self.figure.text(.10, .451, '', fontsize=8.5, va='center', parse_math=False)
         self.sync()
 
     def _axes(self, rect):
@@ -143,8 +144,8 @@ class HeightPanel:
     def _box(self, rect, label, callback):
         box = TextBox(self._axes(rect), label)
         label_above(box)
-        box.label.set_fontsize(6.5)
-        box.text_disp.set_fontsize(7)
+        box.label.set_fontsize(LABEL_FONT_SIZE)
+        box.text_disp.set_fontsize(INPUT_FONT_SIZE)
         box.text_disp.set_parse_math(False)
         box.text_disp.set_clip_path(box.ax.patch)
         box.text_disp.set_clip_on(True)
@@ -320,7 +321,7 @@ class HeightPanel:
                                        xytext=(arrow_x, hot_y + direction * roi.height * .10),
                                        arrowprops=dict(arrowstyle='-|>', color=roi.color, lw=1.5))
         self.direction_note = ax.text(.02, .98, f'Hot {config.heated_edge} | z {"↓" if direction == 1 else "↑"}',
-                                      transform=ax.transAxes, ha='left', va='top', fontsize=7,
+                                      transform=ax.transAxes, ha='left', va='top', fontsize=9,
                                       bbox=dict(facecolor='white', alpha=.85, edgecolor='none', pad=2))
         self._spatial_artists = [hot_line, self.height_arrow, self.direction_note]
         if config.zones_enabled:
@@ -357,10 +358,10 @@ class HeightPanel:
                 order = np.argsort(z)
                 ax.plot(z[order], profile.means_c[order], color=roi.color, label=self._short(roi.name, 26),
                         marker='o' if roi.height == 1 else '.', markersize=3)
-            ax.set_xlabel(f'Height from heated edge ({settings.height_unit})', fontsize=8)
-            ax.set_ylabel('Temperature (°C)', fontsize=8)
+            ax.set_xlabel(f'Height from heated edge ({settings.height_unit})', fontsize=9)
+            ax.set_ylabel('Temperature (°C)', fontsize=9)
             if any(np.isfinite(line.get_ydata()).any() for line in ax.lines):
-                ax.legend(fontsize=6, loc='best')
+                ax.legend(fontsize=8, loc='best')
             elif ax.lines:
                 self._empty(ax, 'No finite temperatures in checked ROIs')
             else:
@@ -378,7 +379,7 @@ class HeightPanel:
     @staticmethod
     def _empty(ax, text):
         ax.set_axis_off()
-        ax.text(.5, .5, text, transform=ax.transAxes, ha='center', va='center', fontsize=8, wrap=True)
+        ax.text(.5, .5, text, transform=ax.transAxes, ha='center', va='center', fontsize=9, wrap=True)
 
     def _key(self):
         p = self.panel
@@ -411,22 +412,22 @@ class HeightPanel:
         for roi, config, channels in rows:
             for i, points in enumerate(channels[:3]):
                 ax.plot(points[:, 0], points[:, 1], color=roi.color, linestyle=ZONE_STYLES[i],
-                        label=f'{self._short(roi.name, 18)}: {self._short(config.zone_names[i], 14)}', marker='.', markersize=2)
+                        label=f'{self._short(roi.name, 8)}: {self._short(config.zone_names[i], 7)}', marker='.', markersize=2)
             points = channels[3]
             names = [config.zone_names[ZONE_KEYS.index(k)] for k in config.delta_pair]
             delta_ax.plot(points[:, 0], points[:, 1], color=roi.color,
-                          label=f'{self._short(roi.name, 18)}: {self._short(names[0], 12)}−{self._short(names[1], 12)}',
+                          label=f'{self._short(roi.name, 10)}: {self._short(names[0], 8)}−{self._short(names[1], 8)}',
                           marker='.', markersize=2)
-        ax.set_ylabel('Zone mean (°C)', fontsize=7)
+        ax.set_ylabel('Zone mean (°C)', fontsize=9)
         ax.tick_params(labelbottom=False)
-        delta_ax.set_xlabel('Time from confirmed-range first timestamp (s)', fontsize=7)
-        delta_ax.set_ylabel('A−B (°C)', fontsize=7)
+        delta_ax.set_xlabel('Time from confirmed-range first timestamp (s)', fontsize=9)
+        delta_ax.set_ylabel('A−B (°C)', fontsize=9)
         if any(np.isfinite(line.get_ydata()).any() for line in ax.lines):
-            ax.legend(fontsize=5.5, loc='best', ncol=2)
+            ax.legend(fontsize=8, loc='best', ncol=2)
         else:
             self._empty(ax, 'No finite temperatures in enabled zones')
         if any(np.isfinite(line.get_ydata()).any() for line in delta_ax.lines):
-            delta_ax.legend(fontsize=5.5, loc='best')
+            delta_ax.legend(fontsize=8, loc='best')
         else:
             self._empty(delta_ax, 'No finite zone mean differences A−B')
         if reduced or time_break:

@@ -17,6 +17,11 @@ ACCENT = "#2563eb"
 SOFT_ACCENT = "#e8f0ff"
 DISABLED = "#eef1f5"
 DISABLED_INK = "#94a0b2"
+BUTTON_FONT_SIZE = 11
+COMPACT_BUTTON_FONT_SIZE = 10
+INPUT_FONT_SIZE = 10
+LABEL_FONT_SIZE = 9
+NAV_FONT_SIZE = 12
 
 
 @lru_cache(maxsize=1)
@@ -37,11 +42,48 @@ def style_border(axes, color=BORDER):
         spine.set_linewidth(.7)
 
 
+class _ButtonLabel(Text):
+    """Keep the chosen font size and abbreviate long labels at the current DPI."""
+
+    def set_text(self, text):
+        if not getattr(self, "_drawing", False):
+            self._full_text = str(text) if text is not None else ""
+        return super().set_text(text)
+
+    def draw(self, renderer):
+        full = self._full_text
+        available = max(0, self.axes.bbox.width - renderer.points_to_pixels(6))
+        def width(text):
+            return renderer.get_text_width_height_descent(text, self.get_fontproperties(), False)[0]
+        displayed = full
+        if width(full) > available:
+            low, high = 0, len(full)
+            while low < high:
+                middle = (low + high + 1) // 2
+                if width(full[:middle] + "…") <= available:
+                    low = middle
+                else:
+                    high = middle - 1
+            displayed = full[:low] + "…"
+        super().set_text(displayed)
+        self._drawing = True
+        try:
+            super().draw(renderer)
+        finally:
+            self._drawing = False
+
+
 class ThemedButton(Button):
     def __init__(self, ax, label, *, role="default", **kwargs):
         self.role, self.selected, self.tint = role, False, None
         super().__init__(ax, label, **kwargs)
-        self.label.set_fontsize(9)
+        original = self.label
+        self.label = _ButtonLabel(*original.get_position(), text=original.get_text())
+        self.label.update_from(original)
+        original.remove()
+        ax.add_artist(self.label)
+        self.label.set_parse_math(False)
+        self.label.set_fontsize(BUTTON_FONT_SIZE)
         self.label.set_fontfamily(ui_font())
         self.refresh_style()
 
@@ -86,7 +128,7 @@ class ThemedTextBox(TextBox):
         super().__init__(ax, label, initial=initial, **kwargs)
         for text in (self.label, self.text_disp):
             style_text(text)
-            text.set_fontsize(9)
+            text.set_fontsize(INPUT_FONT_SIZE)
         self.label.set_color(MUTED)
         self._style()
 
@@ -127,14 +169,14 @@ def _slider_defaults(kwargs):
 def _style_slider_text(slider):
     for text in (slider.label, slider.valtext):
         style_text(text)
-        text.set_fontsize(9)
+        text.set_fontsize(INPUT_FONT_SIZE)
     slider.label.set_color(MUTED)
 
 
 def style_plot(axes):
     axes.set_facecolor(SURFACE)
     style_border(axes)
-    axes.tick_params(colors=MUTED, labelsize=8.5, width=.7)
+    axes.tick_params(colors=MUTED, labelsize=9, width=.7)
     for text in (axes.title, axes.xaxis.label, axes.yaxis.label,
                  *axes.get_xticklabels(), *axes.get_yticklabels(), *axes.texts):
         style_text(text)

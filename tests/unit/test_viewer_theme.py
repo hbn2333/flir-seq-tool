@@ -7,6 +7,27 @@ from flir_seq_tool.viewer import ViewerSession, build_viewer
 from test_viewer import FakeTemperatureReader, make_frames
 
 
+def test_button_abbreviation_keeps_font_and_restores_text_after_resize():
+    from flir_seq_tool.viewer_theme import ThemedButton
+    figure = plt.figure(figsize=(3, 2))
+    full = 'Long button label ' * 3
+    button = ThemedButton(figure.add_axes((.1, .2, .8, .4)), full)
+    try:
+        font_size = button.label.get_fontsize()
+        figure.canvas.draw()
+        assert button.label.get_text().endswith('…')
+        assert button.label.get_fontsize() == font_size
+        figure.set_size_inches(16, 2)
+        figure.canvas.draw()
+        assert button.label.get_text() == full
+        button.label.set_text('New label $literal$')
+        figure.canvas.draw()
+        assert button.label.get_text() == 'New label $literal$'
+        assert not button.label.get_parse_math()
+    finally:
+        plt.close(figure)
+
+
 def test_light_theme_is_local_and_page_changes_preserve_input_lifecycle():
     from flir_seq_tool.viewer_theme import UI_BACKGROUND
     defaults = dict(matplotlib.rcParams)
