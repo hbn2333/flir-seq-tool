@@ -1132,33 +1132,23 @@ def test_confirming_single_frame_hides_sliders_until_full_reset():
 
 
 def test_launch_viewer_keeps_ui_alive_while_event_loop_runs(monkeypatch, tmp_path):
-    shutdown_calls = []
-    class FakeReader:
-        path = tmp_path / "sample.seq"
-        num_frames = 1
-        width = 3
-        height = 2
-
+    readers = []
+    class FakeReader(FileBackedFakeReader):
+        def __init__(self, path):
+            super().__init__(make_frames(1), path)
+            self.closed = False
+            readers.append(self)
         def __enter__(self):
             return self
-
         def __exit__(self, *_args):
-            return None
-
-    class ViewerToken:
-        class video_controller:
-            @staticmethod
-            def close():
-                pass
-
-        def shutdown_analysis(self, *, wait=False):
-            shutdown_calls.append(wait)
+            self.closed = True
 
     token_reference = None
 
-    def fake_build_viewer(_session, initial_frame=0):
+    original_build = viewer.build_viewer
+    def fake_build_viewer(session, **kwargs):
         nonlocal token_reference
-        token = ViewerToken()
+        token = original_build(session, **kwargs)
         token_reference = weakref.ref(token)
         return token
 
@@ -1167,12 +1157,13 @@ def test_launch_viewer_keeps_ui_alive_while_event_loop_runs(monkeypatch, tmp_pat
         assert token_reference is not None
         assert token_reference() is not None
 
-    monkeypatch.setattr(viewer, "ScienceFileReader", lambda _path: FakeReader())
+    monkeypatch.setattr(viewer, "ScienceFileReader", FakeReader)
     monkeypatch.setattr(viewer, "build_viewer", fake_build_viewer)
     monkeypatch.setattr(viewer.plt, "show", fake_show)
 
     viewer.launch_viewer(tmp_path / "sample.seq")
-    assert shutdown_calls == [True]
+    assert readers[0].closed
+    plt.close("all")
 
 
 def saved_startup_view(tmp_path):
@@ -1272,23 +1263,28 @@ def test_startup_pending_blocks_auto_and_manual_loading(tmp_path, monkeypatch, c
     assert session.state_signature() == before
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
 def test_startup_launch_restores_before_first_draw_and_does_not_reload(tmp_path, monkeypatch, version):
     from contextlib import nullcontext
     reader, config, document = saved_startup_view(tmp_path)
-    if version < 3:
+    if version < 4:
         payload = document.to_dict()
         payload["schema_version"] = version
-        del payload["measurement"]
+        payload.pop("provenance", None)
+        if version < 3:
+            del payload["measurement"]
+        else:
+            for key in ("height_settings", "height_view", "height_unit"):
+                payload["measurement"].pop(key)
         if version == 1:
             del payload["transform"]
         config.write_text(json.dumps(payload), encoding="utf-8")
     monkeypatch.setattr(viewer, "ScienceFileReader", lambda _: nullcontext(reader))
     original_build = viewer.build_viewer
-    def build(session, initial_frame):
-        assert reader.requested_frames == []
+    def build(session, initial_frame, **kwargs):
+        assert reader.requested_frames == [1]
         assert session.selection_path == config
-        ui = original_build(session, initial_frame=initial_frame)
+        ui = original_build(session, initial_frame=initial_frame, **kwargs)
         assert reader.requested_frames == [1]
         expected = FrameTransform.identity(3, 2) if version == 1 else document.transform
         assert session.applied_transform == expected

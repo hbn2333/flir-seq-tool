@@ -137,6 +137,21 @@ class SelectionDialogs:
         )
         return Path(value) if value else None
 
+    def choose_seq_open(self, initial_dir: Path) -> Path | None:
+        value = self._run("file", "askopenfilename", title="Open SEQ",
+                          initialdir=str(initial_dir), filetypes=[("FLIR SEQ", "*.seq")])
+        if not value:
+            return None
+        path = Path(value)
+        if path.suffix.lower() != ".seq":
+            raise ValueError("Use a .seq file")
+        return path
+
+    def choose_unsaved_action(self, message: str) -> str:
+        answer = self._run("message", "askyesnocancel", title="Open another SEQ",
+                           message=message, detail="Yes: Save and open    No: Discard and open    Cancel: Keep current SEQ")
+        return "cancel" if answer is None else "save" if answer else "discard"
+
     def choose_analysis_export(self, kind: str, initial_dir: Path, suggested_name: str) -> Path | None:
         if kind not in ("csv", "png"):
             raise ValueError("unknown analysis export kind")

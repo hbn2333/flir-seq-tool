@@ -18,7 +18,7 @@ class PageGroup:
 
 def deactivate_group(group: PageGroup, canvas) -> None:
     for widget in group.widgets:
-        if hasattr(widget, "stop_typing"):
+        if hasattr(widget, "stop_typing") and getattr(widget, "capturekeystrokes", False):
             widget.stop_typing()
         widget.set_active(False)
         if hasattr(widget, "drag_active"):
@@ -93,6 +93,8 @@ class PageCoordinator:
             return
         self.disposed = True
         for group in self.groups.values():
+            for widget in (*group.widgets, *group.selectors):
+                widget.eventson = False
             deactivate_group(group, self.canvas)
             for widget in (*group.widgets, *group.selectors):
                 widget.disconnect_events()

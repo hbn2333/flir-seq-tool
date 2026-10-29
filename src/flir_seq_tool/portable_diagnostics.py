@@ -69,6 +69,8 @@ def diagnose(source, output):
     from .transform import FrameTransform
     from .frame_transformer import FrameTransformer
     from .measurement_models import Roi, MeasurementSettings
+    from .height_models import HeightSettings
+    from .viewer_window import ViewerWindow
     from .measurement_stats import summarize
     from .measurement_store import ResultStore
     from .extraction import (build_export_request, preflight_export, run_export,
@@ -77,6 +79,8 @@ def diagnose(source, output):
     from .video_encoder import discover_encoder
     from .file_safety import DEFAULT_RAW_ROOT, validate_write_path
     import threading
+    import csv
+    from types import SimpleNamespace
 
     source = Path(source).resolve(strict=True)
     before = source.stat()
@@ -118,12 +122,45 @@ def diagnose(source, output):
             assert stats.valid_pixels > 0
             session.measurement.settings = MeasurementSettings((roi,), roi.id)
             report['checks'].append('transform_roi')
-            ui = build_viewer(session)
+            export_target = {'path': output / 'height.csv'}
+            diagnostics_dialogs = SimpleNamespace(
+                choose_analysis_export=lambda *a, **k: export_target['path'],
+                confirm=lambda *a, **k: True, choose_unsaved_action=lambda *a: 'discard')
+            ui = build_viewer(session, dialogs=diagnostics_dialogs)
             try:
                 ui.figure.savefig(output / 'process.png')
                 ui.pages.switch('measure')
                 ui.figure.savefig(output / 'measure.png')
                 report['checks'].append('viewer_pages')
+                session.measurement.settings = MeasurementSettings((roi,), roi.id, result_view='height').with_height(
+                    HeightSettings(roi.id, zones_enabled=True).calibrate(roi.height, 10))
+                ui.measure_panel.refresh_frame(session.frame_at_local(session.timeline.current_local_frame))
+                ui.measure_panel.on_calculate()
+                job = ui.analysis_job
+                job.join(30)
+                if job.is_alive():
+                    job.cancel()
+                    job.join()
+                    raise RuntimeError('Frozen height analysis exceeded acceptance deadline')
+                ui.poll_analysis()
+                assert session.measurement.status == 'complete', ui.message_details
+                for kind in ('height', 'zones'):
+                    export_target['path'] = output / f'{kind}.csv'
+                    ui.measure_panel.on_export_height(kind)
+                    job = ui.height_export_state.job
+                    if job is not None:
+                        job.join(30)
+                        if job.is_alive():
+                            job.cancel()
+                            job.join()
+                            raise RuntimeError('Frozen height CSV exceeded acceptance deadline')
+                        assert job.outcome.status == 'complete', job.outcome
+                        ui.poll_height_export()
+                    with export_target['path'].open(encoding='utf-8-sig', newline='') as stream:
+                        rows = list(csv.DictReader(stream))
+                    assert len(rows) == (last-first+1)*(roi.height if kind == 'height' else 1)
+                ui.figure.savefig(output / 'height.png')
+                report['checks'].append('height_analysis_full_and_zones_csv')
             finally:
                 ui.figure.canvas.callbacks.process('close_event', CloseEvent('close_event', ui.figure.canvas))
                 plt.close(ui.figure)
@@ -141,6 +178,18 @@ def diagnose(source, output):
         with ScienceFileReader(request.target_path) as reader:
             assert reader.num_frames == last - first + 1
         report['checks'].append('native_seq')
+        window = ViewerWindow(dialogs=diagnostics_dialogs)
+        try:
+            window.start(source)
+            figure = window.figure
+            assert window.open_source(request.target_path)
+            assert window.figure is figure and window.session.reader.num_frames == last-first+1
+            assert window.open_source(source) and window.figure is figure
+            report['checks'].append('same_window_seq_switch')
+        finally:
+            window.close(wait=True)
+            if window.figure is not None:
+                plt.close(window.figure)
         report['video'] = _wait_video(VideoJob(video_request))
         report['checks'].append('video_spawn_encode_full_decode')
         report['cancel'] = _wait_video(VideoJob(cancel_request), cancel_encoding=True)

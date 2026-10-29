@@ -8,6 +8,8 @@ from matplotlib.widgets import CheckButtons, RectangleSelector
 from .viewer_theme import ThemedButton as Button, ThemedTextBox as TextBox, style_plot, style_border
 
 from .measurement_models import CurrentAnalysis, MeasurementSettings, Roi
+from .height_models import HeightSettings
+from .height_panel import HeightPanel
 from .measurement_stats import histogram, profile, summarize
 from .measurement_plots import draw_distribution, draw_frame_curves, draw_profile
 from .pixel_geometry import rect_from_extents
@@ -21,7 +23,12 @@ COLORS = ("#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
 def replace_roi(settings: MeasurementSettings, updated: Roi) -> MeasurementSettings:
     if not any(roi.id == updated.id for roi in settings.rois):
         raise ValueError("unknown ROI")
-    return replace(settings, rois=tuple(updated if roi.id == updated.id else roi for roi in settings.rois))
+    config = settings.height_for(updated.id).for_height(updated.height)
+    heights = tuple(config if h.roi_id == updated.id else h for h in settings.height_settings)
+    if not any(h.roi_id == updated.id for h in heights):
+        heights += (config,)
+    return replace(settings, rois=tuple(updated if roi.id == updated.id else roi for roi in settings.rois),
+                   height_settings=heights)
 
 
 class MeasurePanel:
@@ -44,6 +51,11 @@ class MeasurePanel:
         self.on_calculate = self.on_cancel = None
         self.on_save_setup = self.on_export = None
         self.can_export = lambda: False
+        self.on_export_height = None
+        self.can_export_height = lambda kind: False
+        self.on_interaction_change = None
+        self._reported_adding = False
+        self._disposed = False
         self.resampled = False
         self.drag_pending = False
         self._drag_extents = None
@@ -87,17 +99,18 @@ class MeasurePanel:
         self.error_text = figure.text(.695, .585, "", color="crimson", fontsize=6.5, va="top")
         self.stats_text = figure.text(.695, .570, "Add an ROI to inspect temperatures", fontsize=7.5, va="top")
         self.analysis_note = figure.text(.075, .942, "", fontsize=8, va="top", parse_math=False)
-        self.current_button = Button(axes((.10, .482, .155, .026)), "Current frame")
-        self.curves_button = Button(axes((.265, .482, .155, .026)), "Frame curves")
-        self.distribution_button = Button(axes((.46, .482, .115, .026)), "Distribution")
-        self.profile_button = Button(axes((.585, .482, .10, .026)), "Profile")
-        self.horizontal_button = Button(axes((.72, .482, .11, .026)), "Horizontal")
-        self.vertical_button = Button(axes((.84, .482, .11, .026)), "Vertical")
-        self.mean_button = Button(axes((.46, .482, .085, .026)), "Mean")
-        self.min_button = Button(axes((.555, .482, .085, .026)), "Min")
-        self.max_button = Button(axes((.65, .482, .085, .026)), "Max")
-        self.calculate_button = Button(axes((.75, .482, .105, .026)), "Calculate", role="primary")
-        self.cancel_button = Button(axes((.865, .482, .085, .026)), "Cancel")
+        self.current_button = Button(axes((.08, .482, .12, .026)), "Current frame")
+        self.curves_button = Button(axes((.21, .482, .12, .026)), "Frame curves")
+        self.height_button = Button(axes((.34, .482, .145, .026)), "Height analysis")
+        self.distribution_button = Button(axes((.51, .482, .11, .026)), "Distribution")
+        self.profile_button = Button(axes((.63, .482, .095, .026)), "Profile")
+        self.horizontal_button = Button(axes((.74, .482, .10, .026)), "Horizontal")
+        self.vertical_button = Button(axes((.85, .482, .10, .026)), "Vertical")
+        self.mean_button = Button(axes((.50, .482, .08, .026)), "Mean")
+        self.min_button = Button(axes((.59, .482, .08, .026)), "Min")
+        self.max_button = Button(axes((.68, .482, .08, .026)), "Max")
+        self.calculate_button = Button(axes((.77, .482, .10, .026)), "Calculate", role="primary")
+        self.cancel_button = Button(axes((.88, .482, .07, .026)), "Cancel")
         self.save_setup_button = Button(axes((.15, .16, .17, .027)), "Save setup")
         self.export_csv_button = Button(axes((.35, .16, .17, .027)), "Export CSV")
         self.export_png_button = Button(axes((.55, .16, .17, .027)), "Export PNG")
@@ -115,10 +128,11 @@ class MeasurePanel:
             button.on_clicked(lambda event, value=value: self._set_view("curve_metric", value))
         self.calculate_button.on_clicked(lambda event: self.on_calculate() if self.on_calculate else None)
         self.cancel_button.on_clicked(lambda event: self.on_cancel() if self.on_cancel else None)
-        self.analysis_controls = (self.current_button, self.curves_button, self.distribution_button,
+        self.analysis_controls = (self.current_button, self.curves_button, self.height_button, self.distribution_button,
                                   self.profile_button, self.horizontal_button, self.vertical_button)
         for button, field, value in (
             (self.current_button, "result_view", "current"), (self.curves_button, "result_view", "curves"),
+            (self.height_button, "result_view", "height"),
             (self.distribution_button, "frame_view", "distribution"), (self.profile_button, "frame_view", "profile"),
             (self.horizontal_button, "profile_direction", "horizontal"), (self.vertical_button, "profile_direction", "vertical"),
         ):
@@ -143,6 +157,9 @@ class MeasurePanel:
         self.callback_ids.append(figure.canvas.mpl_connect("button_release_event", self._after_release))
         self.callback_ids.append(figure.canvas.mpl_connect("motion_notify_event", self._on_motion))
         self.callback_ids.append(figure.canvas.mpl_connect("key_press_event", self._on_key))
+        self.height_panel = HeightPanel(self)
+        self.control_axes.extend(self.height_panel.control_axes)
+        self.widgets.extend(self.height_panel.widgets)
         self._sync()
 
     @property
@@ -157,6 +174,9 @@ class MeasurePanel:
 
     def _publish(self, settings, *, geometry=False, sync=True):
         settings.validate_bounds(*self._bounds())
+        if settings.height_unit == 'mm' and any(r.checked and settings.height_for(r.id).mm_per_pixel is None
+                                                for r in settings.rois):
+            settings = replace(settings, height_unit='px')
         self.state.settings = settings
         (self.on_geometry_change if geometry else self.on_display_change)()
         if self._frame is not None:
@@ -221,14 +241,20 @@ class MeasurePanel:
         if self.updating or not self._can_edit() or self.selected is None:
             return
         try:
+            before = self.state.settings
             changes = {name: int(box.text.strip()) for name, box in self.geometry_boxes.items()}
             updated = replace(self.selected, **changes)
             if updated != self.selected:
                 self._publish(replace_roi(self.state.settings, updated), geometry=True)
-            self.error_text.set_text("")
+            self._geometry_notice(before)
         except ValueError as exc:
             self._sync()
             self.error_text.set_text(str(exc)[:50])
+
+    def _geometry_notice(self, before):
+        disabled = any(before.height_for(roi.id).zones_enabled and not self.state.settings.height_for(roi.id).zones_enabled
+                       for roi in self.state.settings.rois if any(r.id == roi.id for r in before.rois))
+        self.error_text.set_text('Height zones disabled: adjust cuts\nso every zone contains a row' if disabled else '')
 
     def delete_selected(self):
         if not self._can_edit() or self.selected is None:
@@ -242,7 +268,9 @@ class MeasurePanel:
         active = remaining[min(index, len(remaining) - 1)].id if remaining else None
         self.adding = False
         self.page_index = min(index, max(0, len(remaining) - 1)) // self.PAGE_SIZE
-        self._publish(replace(self.state.settings, rois=remaining, active_roi_id=active), geometry=True)
+        self._publish(replace(self.state.settings, rois=remaining, active_roi_id=active,
+                              height_settings=tuple(h for h in self.state.settings.height_settings if h.roi_id != selected.id)),
+                      geometry=True)
 
     def _before_press(self, event):
         self.selector.set_active(self._can_edit() and self.image_axes.get_navigate_mode() is None
@@ -257,6 +285,7 @@ class MeasurePanel:
         if abs(p1[0] - p0[0]) <= self.selector.minspanx or abs(p1[1] - p0[1]) <= self.selector.minspany:
             return
         try:
+            before = self.state.settings
             crop = rect_from_extents((x0, x1, y0, y1))
             if self.adding:
                 number, names = 1, {roi.name for roi in self.state.settings.rois}
@@ -264,7 +293,8 @@ class MeasurePanel:
                     number += 1
                 roi = Roi(uuid4().hex, f"ROI {number}", crop.x, crop.y, crop.width, crop.height,
                           COLORS[len(self.state.settings.rois) % len(COLORS)], True)
-                settings = replace(self.state.settings, rois=(*self.state.settings.rois, roi), active_roi_id=roi.id)
+                settings = replace(self.state.settings, rois=(*self.state.settings.rois, roi), active_roi_id=roi.id,
+                                   height_settings=(*self.state.settings.height_settings, HeightSettings(roi.id)))
                 settings.validate_bounds(*self._bounds())
                 self.adding = False
                 self.page_index = (len(settings.rois) - 1) // self.PAGE_SIZE
@@ -276,7 +306,7 @@ class MeasurePanel:
             else:
                 return
             self._publish(settings, geometry=True)
-            self.error_text.set_text("")
+            self._geometry_notice(before)
         except ValueError as exc:
             self.error_text.set_text(str(exc)[:50])
 
@@ -314,7 +344,9 @@ class MeasurePanel:
             rect = rect_from_extents(extents)
             roi = replace(self.selected, x=rect.x, y=rect.y, width=rect.width, height=rect.height)
             if roi != self.selected:
+                before = self.state.settings
                 self._publish(replace_roi(self.state.settings, roi), geometry=True, sync=False)
+                self._geometry_notice(before)
         except ValueError as exc:
             self.error_text.set_text(str(exc)[:50])
 
@@ -364,7 +396,7 @@ class MeasurePanel:
                 return "N/A" if value is None else f"{value:.2f}"
             self.stats_text.set_text(
                 f"Mean {number(stats.mean_c)} °C | Min {number(stats.min_c)} °C\n"
-                f"Max {number(stats.max_c)} °C | ΔT {number(stats.delta_c)} °C\n"
+                f"Max {number(stats.max_c)} °C | ROI range {number(stats.delta_c)} °C\n"
                 f"Std {number(stats.std_c)} °C (ddof=0)\n"
                 f"Valid pixels {stats.valid_pixels}/{stats.total_pixels}"
                 + (f" ({stats.total_pixels - stats.valid_pixels} excluded)" if stats.valid_pixels < stats.total_pixels else ""))
@@ -373,7 +405,7 @@ class MeasurePanel:
         plot_key = (id(analysis), self.state.settings.result_view, self.state.settings.frame_view,
                     self.state.settings.profile_direction, self.state.settings.curve_metric,
                     self.state.status, id(self.state.result_store), self.current_local_frame,
-                    tuple((roi.name, roi.color, roi.checked) for roi in self.state.settings.rois))
+                    self.state.settings)
         if self.result_axes is not None and plot_key != self._plot_key:
             self._plot_key = plot_key
             ax = self.result_axes
@@ -395,6 +427,8 @@ class MeasurePanel:
                             result_ax.set_axis_off()
                             result_ax.text(.5, .5, messages.get(self.state.status, "Not calculated"),
                                            transform=result_ax.transAxes, ha="center", va="center")
+            elif self.state.settings.result_view == 'height':
+                self.height_panel.draw(ax, self.delta_axes, self._frame)
             elif analysis is None:
                 ax.clear()
                 ax.set_axis_off()
@@ -414,8 +448,17 @@ class MeasurePanel:
         self.save_setup_button.set_active(ready)
         for button in (self.export_csv_button, self.export_png_button):
             button.set_active(ready and self.can_export())
+        height = settings.result_view == 'height'
+        self.stats_text.set_visible(self.visible and not height)
+        self.export_csv_button.ax.set_visible(self.visible and not height)
+        self.export_csv_button.set_active(ready and not height and self.can_export())
+        self.export_png_button.ax.set_visible(self.visible and not height)
+        self.export_png_button.set_active(ready and not height and self.can_export())
+        self.save_setup_button.ax.set_position((.09, .16, .13, .027) if height else (.15, .16, .17, .027))
+        self.export_png_button.ax.set_position((.77, .16, .13, .027) if height else (.55, .16, .17, .027))
         if self.delta_axes is not None:
-            self.delta_axes.set_visible(self.visible and settings.result_view == "curves")
+            self.delta_axes.set_visible(self.visible and (settings.result_view == "curves" or
+                                                         height and settings.height_view == 'zones'))
         for button in self.analysis_controls:
             visible = self.visible
             if button in (self.distribution_button, self.profile_button):
@@ -426,20 +469,27 @@ class MeasurePanel:
             button.set_active(visible and not self.busy)
         for button, selected in ((self.current_button, settings.result_view == "current"),
                                   (self.curves_button, settings.result_view == "curves"),
+                                  (self.height_button, height),
                                   (self.distribution_button, settings.frame_view == "distribution"),
                                   (self.profile_button, settings.frame_view == "profile"),
                                   (self.horizontal_button, settings.profile_direction == "horizontal"),
                                   (self.vertical_button, settings.profile_direction == "vertical")):
             button.set_selected(selected)
         for button in self.curve_controls:
-            visible = self.visible and settings.result_view == "curves"
+            visible = self.visible and (settings.result_view == "curves" or height and
+                                        button in (self.calculate_button, self.cancel_button))
             button.ax.set_visible(visible)
             button.set_active(visible and not self.busy)
-        self.calculate_button.set_active(self.visible and settings.result_view == "curves"
+        self.calculate_button.set_active(self.visible and settings.result_view in ("curves", 'height')
                                           and not self.busy and not self.adding and bool(settings.rois))
-        self.cancel_button.set_active(self.visible and settings.result_view == "curves" and self.busy)
+        self.cancel_button.set_active(self.visible and settings.result_view in ("curves", 'height') and self.busy)
         for button, value in ((self.mean_button, "mean"), (self.min_button, "min"), (self.max_button, "max")):
             button.set_selected(settings.curve_metric == value)
+        self.height_panel.sync()
+        if self._reported_adding != self.adding:
+            self._reported_adding = self.adding
+            if self.on_interaction_change:
+                self.on_interaction_change()
 
     def _on_key(self, event):
         if self._can_edit() and event.key == "escape" and self.adding:
@@ -467,6 +517,7 @@ class MeasurePanel:
             self.selector.set_visible(False)
             for patch in self.patches:
                 patch.set_visible(False)
+            self.height_panel.sync()
             return
         self.updating = True
         try:
@@ -527,7 +578,7 @@ class MeasurePanel:
             self._drag_extents = None
             self._dragging = False
             for widget in self.widgets:
-                if hasattr(widget, "stop_typing"):
+                if getattr(widget, 'capturekeystrokes', False):
                     widget.stop_typing()
                 widget.active = False
             if self.figure.canvas.mouse_grabber in self.control_axes:
@@ -540,15 +591,30 @@ class MeasurePanel:
         if self.busy == bool(busy):
             return
         self.busy = bool(busy)
+        if self.busy:
+            self._drag_timer.stop()
+            self.drag_pending = False
+            self._drag_extents = None
+            self._dragging = False
+            for widget in self.widgets:
+                if getattr(widget, 'capturekeystrokes', False):
+                    widget.stop_typing()
         self._sync()
 
     def dispose(self):
+        if self._disposed:
+            return
+        for widget in self.widgets:
+            widget.eventson = False
         self.set_visible(False)
+        self.height_panel.dispose()
+        self._drag_timer.remove_callback(self.flush_drag)
         self.selector.disconnect_events()
         for widget in self.widgets:
             widget.disconnect_events()
         for cid in self.callback_ids:
             self.figure.canvas.mpl_disconnect(cid)
+        self._disposed = True
 
 
 def build_measure_panel(figure, image_axes, state, on_geometry_change, on_display_change, dialogs):

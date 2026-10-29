@@ -47,12 +47,12 @@ def sample_document(path: Path) -> SelectionDocument:
     )
 
 
-def test_v3_roundtrip_preserves_measurement(tmp_path):
+def test_v4_roundtrip_preserves_measurement(tmp_path):
     roi = Roi("r1", "ROI 1", 1, 2, 3, 4, "#1f77b4", True)
     settings = MeasurementSettings(rois=(roi,), active_roi_id="r1")
     document = replace(sample_document(tmp_path / "source.seq"), measurement=settings)
     encoded = document.to_dict()
-    assert encoded["schema_version"] == 3
+    assert encoded["schema_version"] == 4
     assert encoded["measurement"]["coordinate_space"] == "cropped_pixel"
     assert SelectionDocument.from_dict(encoded) == document
 
@@ -64,6 +64,7 @@ def test_old_versions_read_as_empty_measurement_without_rewriting(tmp_path, vers
     encoded = sample_document(source).to_dict()
     encoded["schema_version"] = version
     encoded.pop("measurement", None)
+    encoded.pop("provenance")
     if version == 1:
         encoded.pop("transform")
     target = store.path_for(source)
@@ -72,11 +73,11 @@ def test_old_versions_read_as_empty_measurement_without_rewriting(tmp_path, vers
     original = target.read_bytes()
     loaded = store.load(source)
     assert loaded.measurement == MeasurementSettings()
-    assert loaded.schema_version == 3
+    assert loaded.schema_version == 4
     assert target.read_bytes() == original
 
 
-def test_v3_rejects_roi_outside_cropped_dimensions(tmp_path):
+def test_v4_rejects_roi_outside_cropped_dimensions(tmp_path):
     document = sample_document(tmp_path / "source.seq")
     roi = Roi("r1", "ROI 1", 0, 0, 4, 4, "#1f77b4", True)
     transform = replace(document.transform, crop=CropRect(0, 0, 2, 2))
@@ -113,8 +114,9 @@ def test_selection_document_round_trip_uses_iso_timestamps(tmp_path: Path):
         "display",
         "transform",
         "measurement",
+        "provenance",
     }
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == 4
     assert payload["source"]["first_timestamp"] == START.isoformat()
     assert payload["transform"] == {
         "rotation": {
@@ -128,13 +130,14 @@ def test_selection_document_round_trip_uses_iso_timestamps(tmp_path: Path):
     assert SelectionDocument.from_dict(payload) == document
 
 
-def test_selection_store_loads_v1_as_v3_without_rewriting_file(tmp_path: Path):
+def test_selection_store_loads_v1_as_v4_without_rewriting_file(tmp_path: Path):
     source_path = tmp_path / "sample.seq"
     store = SelectionStore(tmp_path / "selections")
     payload = sample_document(source_path).to_dict()
     payload["schema_version"] = 1
     payload.pop("transform")
     payload.pop("measurement")
+    payload.pop("provenance")
     target = store.path_for(source_path)
     target.parent.mkdir(parents=True)
     original_bytes = (json.dumps(payload, indent=2) + "\n").encode("utf-8")
@@ -142,7 +145,7 @@ def test_selection_store_loads_v1_as_v3_without_rewriting_file(tmp_path: Path):
 
     loaded = store.load(source_path)
 
-    assert loaded.schema_version == 3
+    assert loaded.schema_version == 4
     assert loaded.transform == FrameTransform.identity(640, 480)
     assert target.read_bytes() == original_bytes
 
@@ -181,7 +184,7 @@ def test_selection_document_round_trips_nonzero_transform(tmp_path: Path):
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
-        (lambda p: p.update(schema_version=4), "unsupported schema_version"),
+        (lambda p: p.update(schema_version=5), "unsupported schema_version"),
         (lambda p: p["selection"].pop("frame_count"), "keys"),
         (lambda p: p["source"].update(num_frames=True), "num_frames"),
         (lambda p: p["selection"].update(source_start_frame=65), "range"),
@@ -292,10 +295,14 @@ def test_selection_document_constructor_requires_integer_schema_version(
     with pytest.raises(ValueError, match="schema_version.*integer"):
         replace(document, schema_version=schema_version)
 
-@pytest.mark.parametrize("schema_version", [1, 2, 3])
+@pytest.mark.parametrize("schema_version", [1, 2, 3, 4])
 def test_selection_document_rejects_unknown_root_key(tmp_path, schema_version):
     payload = sample_document(tmp_path / "sample.seq").to_dict()
     payload["schema_version"] = schema_version
+    if schema_version < 4:
+        payload.pop("provenance")
+        for key in ('height_settings', 'height_view', 'height_unit'):
+            payload['measurement'].pop(key)
     if schema_version < 3:
         payload.pop("measurement")
     if schema_version == 1:

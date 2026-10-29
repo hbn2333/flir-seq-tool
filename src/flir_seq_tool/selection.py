@@ -11,10 +11,11 @@ from typing import Any
 
 from .transform import CropRect, FrameTransform, RotationSettings
 from .measurement_models import MeasurementSettings
+from .provenance import SourceLink, validate_provenance
 from .file_safety import DEFAULT_RAW_ROOT, TargetSnapshot, assert_snapshot, validate_write_path
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _TIME_TOLERANCE_S = 1e-6
 
 
@@ -82,7 +83,8 @@ def _validate_root_version_and_keys(
     schema_version = _require_int(root["schema_version"], "schema_version")
     root_keys = {"schema_version", "source", "selection", "display"}
     expected = {1: root_keys, 2: root_keys | {"transform"},
-                3: root_keys | {"transform", "measurement"}}
+                3: root_keys | {"transform", "measurement"},
+                4: root_keys | {"transform", "measurement", "provenance"}}
     if schema_version not in expected:
         raise ValueError(f"unsupported schema_version: {schema_version}")
     _require_keys(root, expected[schema_version], "root")
@@ -122,8 +124,8 @@ class SourceIdentity:
         _require_matching_timezone_awareness(
             self.first_timestamp, self.last_timestamp, "source timestamps"
         )
-        if self.first_timestamp > self.last_timestamp:
-            raise ValueError("source timestamps must be ordered")
+        # Source identity records endpoints, including clock resets. Height analyses
+        # preserve frame order and report duplicate/backwards times separately.
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -189,8 +191,6 @@ class FrameSelection:
         _require_matching_timezone_awareness(
             self.start_timestamp, self.end_timestamp, "selection timestamps"
         )
-        if self.end_timestamp < self.start_timestamp:
-            raise ValueError("selection timestamps must be ordered")
         expected_duration = (self.end_timestamp - self.start_timestamp).total_seconds()
         if not math.isfinite(self.duration_s):
             raise ValueError("duration_s must be finite")
@@ -340,6 +340,7 @@ class SelectionDocument:
     display: DisplaySettings
     transform: FrameTransform
     measurement: MeasurementSettings = field(default_factory=MeasurementSettings)
+    provenance: tuple[SourceLink, ...] = ()
 
     def __post_init__(self) -> None:
         _require_int(self.schema_version, "schema_version")
@@ -357,6 +358,7 @@ class SelectionDocument:
         if not isinstance(self.measurement, MeasurementSettings):
             raise ValueError("measurement must be MeasurementSettings")
         self.measurement.validate_bounds(self.transform.crop.width, self.transform.crop.height)
+        validate_provenance(self.source, self.provenance)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -366,6 +368,7 @@ class SelectionDocument:
             "display": self.display.to_dict(),
             "transform": transform_to_dict(self.transform),
             "measurement": self.measurement.to_dict(),
+            "provenance": [link.to_dict() for link in self.provenance],
         }
 
     @classmethod
@@ -378,6 +381,11 @@ class SelectionDocument:
             if schema_version == 1
             else transform_from_dict(root["transform"], source)
         )
+        provenance = ()
+        if schema_version == 4:
+            if not isinstance(root['provenance'], list):
+                raise ValueError('provenance must be a list')
+            provenance = tuple(SourceLink.from_dict(link) for link in root['provenance'])
         return cls(
             schema_version=SCHEMA_VERSION,
             source=source,
@@ -388,8 +396,9 @@ class SelectionDocument:
                 _require_mapping(root["display"], "display")
             ),
             transform=transform,
-            measurement=(MeasurementSettings.from_dict(root["measurement"])
-                         if schema_version == 3 else MeasurementSettings()),
+            measurement=(MeasurementSettings.from_dict(root["measurement"], legacy=schema_version == 3)
+                         if schema_version >= 3 else MeasurementSettings()),
+            provenance=provenance,
         )
 
 
@@ -403,6 +412,7 @@ def build_selection_document(
     display: DisplaySettings,
     transform: FrameTransform | None = None,
     measurement: MeasurementSettings | None = None,
+    provenance: tuple[SourceLink, ...] = (),
 ) -> SelectionDocument:
     return SelectionDocument(
         schema_version=SCHEMA_VERSION,
@@ -422,6 +432,7 @@ def build_selection_document(
             else transform
         ),
         measurement=MeasurementSettings() if measurement is None else measurement,
+        provenance=provenance,
     )
 
 

@@ -30,6 +30,8 @@ from .models import TemperatureFrame
 from .measurement_state import AnalysisKey, MeasureState
 from .measurement_panel import MeasurePanel, build_measure_panel
 from .measurement_job import AnalysisJob, AnalysisRequest
+from .height_job import HeightAnalysisJob
+from .height_export import HeightExportJob, build_height_snapshot
 from .measurement_export import AnalysisExportSnapshot, export_csv, export_png
 from .reader import ScienceFileReader
 from .selection import (
@@ -37,6 +39,7 @@ from .selection import (
     SelectionDocument,
     SelectionStore,
     SourceIdentity,
+    SourceLink,
     build_selection_document,
     validate_source_identity,
     transform_to_dict,
@@ -44,6 +47,7 @@ from .selection import (
 from .selection_dialogs import SelectionDialogs
 from .file_safety import TargetSnapshot
 from .export_bundle import sidecar_path, pending_path
+from .provenance import origin_fields
 from .timeline import TimelineState
 from .transform import FrameTransform
 from .transform_editor import TransformDraft, TransformEditorUI, build_transform_editor
@@ -107,6 +111,7 @@ class ViewerSession:
         self.process_saved_signature: str | None = None
         self.measure_saved_signature: str | None = None
         self.measurement = MeasureState()
+        self.provenance: tuple[SourceLink, ...] = ()
         self._retired_measurement_stores: list[Any] = []
         self.measurement_cleanup_error: str | None = None
         self.timeline = TimelineState(reader.num_frames)
@@ -321,6 +326,7 @@ class ViewerSession:
             ),
             transform=self.applied_transform,
             measurement=self.measurement.settings,
+            provenance=self.provenance,
         )
 
     def save_selection(
@@ -388,6 +394,7 @@ class ViewerSession:
         self._work_time_value = None
         previous = self.measurement.clear()
         self.measurement.settings = document.measurement
+        self.provenance = document.provenance
         self.selection_dirty = False
         self._establish_saved_signatures()
         self.selection_path = Path(path)
@@ -406,9 +413,9 @@ class ViewerSession:
             else [limits.vmin, limits.vmax],
             "colormap": self.colormap,
             "transform": self.applied_transform.fingerprint,
+            "measurement": self.measurement.settings.to_dict(),
+            "provenance": [link.to_dict() for link in self.provenance],
         }
-        if scope == "measure":
-            payload["measurement"] = self.measurement.settings.to_dict()
         encoded = json.dumps(
             payload, sort_keys=True, separators=(",", ":"), allow_nan=False
         ).encode("utf-8")
@@ -457,6 +464,13 @@ class ViewerAnalysisState:
     request: AnalysisRequest | None = None
     timer: Any | None = None
     closed: bool = False
+    requires_height: bool = False
+
+
+@dataclass
+class ViewerHeightExportState:
+    job: Any | None = None
+    timer: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -499,6 +513,10 @@ class ViewerUI:
     video_button: Button
     video_controller: VideoController
     poll_video: Callable[[], None]
+    open_button: Button
+    dispose: Callable[..., None]
+    height_export_state: ViewerHeightExportState
+    poll_height_export: Callable[[], None]
 
     @property
     def analysis_job(self):
@@ -520,20 +538,13 @@ def launch_viewer(
     vmin: float | None = None,
     vmax: float | None = None,
 ) -> None:
-    with ScienceFileReader(path) as reader:
-        session = ViewerSession(reader)
-        local_frame, notices = session.restore_startup(initial_frame=initial_frame, vmin=vmin, vmax=vmax)
-        ui = build_viewer(session, initial_frame=local_frame)
-        if notices:
-            message = "\n".join(notices)
-            ui.message_details["startup"] = message
-            ui.error_text.set_text(message)
-            print(message)
-        try:
-            plt.show()
-        finally:
-            ui.video_controller.close()
-            ui.shutdown_analysis(wait=True)
+    from .viewer_window import ViewerWindow
+    window = ViewerWindow(reader_factory=ScienceFileReader, builder=build_viewer)
+    try:
+        window.start(path, initial_frame=initial_frame, vmin=vmin, vmax=vmax)
+        plt.show()
+    finally:
+        window.close()
 
 
 def build_viewer(
@@ -544,7 +555,36 @@ def build_viewer(
     dialogs: SelectionDialogs | None = None,
     analysis_job_factory: Callable[[AnalysisRequest], Any] = AnalysisJob,
     video_job_factory: Callable = VideoJob,
+    *, figure: Figure | None = None,
+    on_open_seq: Callable | None = None,
+    can_open_seq: Callable[[], bool] = lambda: True,
+    on_window_close: Callable | None = None,
+    height_job_factory: Callable = HeightAnalysisJob,
+    height_export_job_factory: Callable = HeightExportJob,
 ) -> ViewerUI:
+    """Build into an optional owned Figure, reclaiming partial input registrations."""
+    from .viewer_window import UIResources
+    owned_figure = figure is None
+    figure = plt.figure(figsize=(12, 10)) if figure is None else figure
+    resources = UIResources(figure)
+    try:
+        return _build_viewer(session, initial_frame, clips_root, export_job_factory, dialogs,
+                             analysis_job_factory, video_job_factory, figure=figure,
+                             on_open_seq=on_open_seq, can_open_seq=can_open_seq,
+                             on_window_close=on_window_close, resources=resources,
+                             height_job_factory=height_job_factory,
+                             height_export_job_factory=height_export_job_factory)
+    except BaseException:
+        resources.dispose()
+        if owned_figure:
+            plt.close(figure)
+        raise
+
+
+def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialogs,
+                  analysis_job_factory, video_job_factory, *, figure,
+                  on_open_seq, can_open_seq, on_window_close, resources,
+                  height_job_factory, height_export_job_factory) -> ViewerUI:
     frame = session.frame_at_local(initial_frame)
     current_frame = frame
     limits = session.color_limits
@@ -552,9 +592,9 @@ def build_viewer(
         raise RuntimeError("viewer color limits were not initialized")
 
     clips_root = clips_root or (WORKSPACE_ROOT / "clips")
-    figure, axes = plt.subplots(figsize=(12, 10))
+    axes = figure.add_subplot(111)
     theme = ViewerTheme(figure)
-    figure.canvas.manager.set_window_title("FLIR SEQ Tool")
+    figure.canvas.manager.set_window_title(f"FLIR SEQ Tool | {Path(getattr(session.reader, 'path', 'SEQ')).name}")
     if dialogs is None:
         dialogs = SelectionDialogs(getattr(figure.canvas.manager, "window", None))
     figure.subplots_adjust(bottom=0.56, right=0.87, top=0.90)
@@ -571,6 +611,7 @@ def build_viewer(
     process_colorbar_rect = colorbar.ax.get_position(original=True).frozen()
     process_button = Button(figure.add_axes(NAV_RECTS["process"]), "Process")
     measure_button = Button(figure.add_axes(NAV_RECTS["measure"]), "Measure")
+    open_button = Button(figure.add_axes(NAV_RECTS["open"]), "Open SEQ")
     page_title = figure.text(.39, .972, "", fontsize=9, va="center", parse_math=False)
     measure_placeholder = figure.add_axes(MEASURE_RESULT_RECT)
     measure_delta_axes = figure.add_axes(MEASURE_CURVE_DELTA_RECT)
@@ -639,6 +680,10 @@ def build_viewer(
     video_button = Button(video_axes, "Export MP4")
     cancel_button = Button(cancel_axes, "Cancel export")
     cancel_button.set_active(False)
+    resources.add_widgets(slider, range_slider, start_box, end_box, current_frame_box,
+                          confirm_button, reset_button, save_button, load_button,
+                          edit_transform_button, export_button, video_button, cancel_button,
+                          open_button, process_button, measure_button)
     message_details: dict[str, str] = {}
     export_text = BoundedMessage(figure, "export", message_details, max_lines=5, fontsize=7.5)
     progress_text = BoundedMessage(figure, "progress", message_details, max_lines=1)
@@ -653,6 +698,7 @@ def build_viewer(
     export_state = ViewerExportState()
     mode_state = ViewerModeState()
     analysis_state = ViewerAnalysisState()
+    height_export_state = ViewerHeightExportState()
     updating = False
     transform_editor: TransformEditorUI
     pages: PageCoordinator
@@ -714,6 +760,19 @@ def build_viewer(
     def refresh_status(current_frame: TemperatureFrame) -> None:
         start_time, end_time = session.work_timestamps()
         relative_s = (current_frame.timestamp - start_time).total_seconds()
+        origin = origin_fields(session.provenance, current_frame.frame_index)
+        if origin["origin_status"] == "unknown":
+            origin_label = "Origin: unknown"
+            message_details["origin"] = "Original recording unknown: this file has no recorded ancestor mapping."
+        else:
+            ancestor = json.loads(origin["origin_source_identity_json"])
+            origin_label = (f"Origin: {ancestor['filename'][:24]} frame {origin['origin_frame']} "
+                            f"(recorded, depth {origin['origin_depth']})")
+            message_details["origin"] = (
+                f"Earliest recorded ancestor: {ancestor['filename']}; mapped frame {origin['origin_frame']}; "
+                f"depth {origin['origin_depth']}. This is not a verified original recording. "
+                "The mapping uses only this file's recorded provenance; ancestor files are not opened.\n"
+                f"Ancestor identity: {origin['origin_source_identity_json']}")
         status_text.set_text(
             f"Local frame {session.timeline.current_local_frame}/"
             f"{session.timeline.local_num_frames - 1} | "
@@ -721,7 +780,7 @@ def build_viewer(
             f"{session.reader.num_frames - 1} | "
             f"Work source [{session.timeline.source_start}, "
             f"{session.timeline.source_end}]\n"
-            f"Absolute {current_frame.timestamp.isoformat()} | "
+            f"{origin_label} | Absolute {current_frame.timestamp.isoformat()} | "
             f"Relative {relative_s:.3f} s | "
             f"Duration {(end_time - start_time).total_seconds():.3f} s"
         )
@@ -973,7 +1032,10 @@ def build_viewer(
             return
         export_state.confirmation = None
         export_button.label.set_text("Export sub-SEQ")
+        export_button.role = "default"
+        export_button.refresh_style()
         export_text.set_text("Export confirmation invalidated; review and click again.")
+        pages.refresh()
         figure.canvas.draw_idle()
 
     def set_normal_controls_visible(visible: bool) -> None:
@@ -1107,9 +1169,12 @@ def build_viewer(
         if export_state.confirmation is None:
             export_state.confirmation = confirmation
             export_button.label.set_text("Confirm export")
+            export_button.role = "primary"
+            export_button.refresh_style()
             export_text.set_text(confirmation.summary)
             progress_text.set_text("")
             set_error()
+            pages.refresh()
             figure.canvas.draw_idle()
             return
         if export_state.confirmation.signature != confirmation.signature:
@@ -1118,12 +1183,14 @@ def build_viewer(
             set_error("Export selection changed; confirm the updated summary.")
             return
 
-        job = export_job_factory(confirmation.request)
-        export_state.job = job
         export_state.confirmation = None
         export_button.label.set_text("Export sub-SEQ")
+        export_button.role = "default"
+        export_button.refresh_style()
         set_export_controls_active(False)
         try:
+            job = export_job_factory(confirmation.request)
+            export_state.job = job
             job.start()
         except Exception as exc:
             set_export_controls_active(True)
@@ -1134,6 +1201,9 @@ def build_viewer(
         poll_export()
 
     def on_cancel(_event: Any) -> None:
+        if export_state.confirmation is not None:
+            invalidate_export_confirmation()
+            return
         if pages.busy == "video_export":
             video_controller.cancel()
             return
@@ -1184,15 +1254,10 @@ def build_viewer(
         figure.canvas.draw_idle()
 
     def on_close(_event: Any) -> None:
-        video_timer.stop()
-        video_controller.close()
-        shutdown_analysis(wait=False)
-        pages.dispose()
-        measure_panel.dispose()
-        job = export_state.job
-        if job is not None and job.is_alive():
-            job.cancel()
-            job.join(timeout=0.25)
+        if on_window_close is not None:
+            on_window_close()
+        else:
+            dispose(wait=False)
 
     def restore_analysis_status(current_key, *, fallback):
         state = session.measurement
@@ -1211,7 +1276,9 @@ def build_viewer(
             key = AnalysisKey.from_inputs(source, start, end, session.applied_transform, session.measurement.settings.rois)
             request = AnalysisRequest(Path(session.reader.path), source, start, end, session.applied_transform,
                                       session.measurement.settings.rois, key)
-            job = analysis_job_factory(request)
+            analysis_state.requires_height = session.measurement.settings.result_view == "height"
+            factory = height_job_factory if analysis_state.requires_height else analysis_job_factory
+            job = factory(request)
         except Exception as exc:
             set_error(f"Analysis could not start: {exc}")
             return
@@ -1233,6 +1300,12 @@ def build_viewer(
         poll_analysis()
 
     def on_cancel_analysis():
+        export_job = height_export_state.job
+        if pages.busy == "analysis_export" and export_job is not None and export_job.is_alive():
+            export_job.cancel()
+            progress_text.set_text("Cancelling height export; waiting for the current data block")
+            figure.canvas.draw_idle()
+            return
         job = analysis_state.job
         if pages.busy == "analysis" and job is not None and job.is_alive():
             job.cancel()
@@ -1265,6 +1338,8 @@ def build_viewer(
         if valid:
             try:
                 valid = candidate.key_json == current_key.to_json()
+                if analysis_state.requires_height and not getattr(candidate, "has_height", False):
+                    valid, error = False, "Height analysis did not produce complete height data"
             except Exception as exc:
                 valid, error = False, str(exc)
         if valid:
@@ -1346,13 +1421,25 @@ def build_viewer(
         message_details=message_details,
     )
     transform_editor.set_visible(False)
+    resources.add_widgets(transform_editor.angle_slider, transform_editor.angle_box,
+                          *transform_editor.crop_boxes.values(), transform_editor.left_button,
+                          transform_editor.right_button, transform_editor.half_turn_button,
+                          transform_editor.zero_button, transform_editor.maximum_button,
+                          transform_editor.reset_button, transform_editor.cancel_button,
+                          transform_editor.apply_button, transform_editor.selector)
 
     def on_roi_geometry_change():
         session.measurement.invalidate()
+        invalidate_export_confirmation()
+        refresh_transform_status()
+
+    def on_measurement_display_change():
+        invalidate_export_confirmation()
         refresh_transform_status()
 
     measure_panel = build_measure_panel(figure, axes, session.measurement,
-                                        on_roi_geometry_change, refresh_transform_status, dialogs)
+                                        on_roi_geometry_change, on_measurement_display_change, dialogs)
+    resources.add_cleanup(measure_panel.dispose)
     measure_panel.set_visible(False)
     measure_panel.set_result_axes(measure_placeholder, measure_delta_axes)
     measure_panel.on_calculate = on_calculate
@@ -1411,6 +1498,77 @@ def build_viewer(
     measure_panel.can_export = can_export_analysis
     measure_panel.on_export = on_analysis_export
 
+    def can_export_height(kind):
+        if (kind not in ("height", "zones") or pages.busy is not None or measure_panel.adding
+                or session.measurement.settings.result_view != "height"):
+            return False
+        state = session.measurement
+        key = state.result_key
+        return (key is not None and state.is_current(key) and getattr(state.result_store, "has_height", False)
+                and bool(state.settings.rois)
+                and (key.source_start, key.source_end) == session.measure_source_range()
+                and key.transform_fingerprint == session.applied_transform.fingerprint
+                and key.roi_geometry == tuple(sorted((roi.id, roi.x, roi.y, roi.width, roi.height)
+                                                     for roi in state.settings.rois))
+                and (kind == "height" or any(state.settings.height_for(roi.id).zones_enabled
+                                              for roi in state.settings.rois)))
+
+    def on_height_export(kind):
+        if pages.current != "measure" or not can_export_height(kind):
+            return
+        target = None
+        started = False
+        try:
+            snapshot = build_height_snapshot(session)
+            pages.set_busy("analysis_export")
+            start, end = session.measure_source_range()
+            target = dialogs.choose_analysis_export("csv", WORKSPACE_ROOT / "analysis",
+                        f"{Path(session.reader.path).stem}-{start}-{end}-{kind}.csv")
+            if target is None:
+                return
+            expected = TargetSnapshot.capture(target)
+            if expected.exists and not dialogs.confirm(f"Overwrite {kind} CSV?\n{target}"):
+                return
+            job = height_export_job_factory(target, snapshot, kind=kind, expected=expected,
+                                            raw_root=session.selection_store.raw_root)
+            height_export_state.job = job
+            job.start()
+            started = True
+            height_export_state.timer.start()
+            poll_height_export()
+        except Exception as exc:
+            height_export_state.job = None
+            set_error(f"Height export failed: {exc}" + (f"\nFile: {target}" if target is not None else ""))
+        finally:
+            if not started:
+                pages.set_busy(None)
+                sync_all_controls()
+
+    def poll_height_export():
+        job = height_export_state.job
+        if job is None:
+            return
+        snapshot = job.progress.snapshot()
+        progress_text.set_text(f"Height export: {snapshot.completed}/{snapshot.total} | {snapshot.message}")
+        measure_panel.cancel_button.set_active(job.is_alive())
+        if job.is_alive():
+            figure.canvas.draw_idle()
+            return
+        height_export_state.timer.stop()
+        outcome = job.outcome
+        height_export_state.job = None
+        pages.set_busy(None)
+        sync_all_controls()
+        if outcome is not None and outcome.status == "complete":
+            set_error(f"Exported height CSV: {outcome.path}", error=False)
+        elif outcome is not None and outcome.status == "cancelled":
+            set_error("Height export cancelled", error=False)
+        else:
+            set_error("Height export failed: " + (getattr(outcome, "error", None) or "Worker ended without an outcome"))
+
+    measure_panel.can_export_height = can_export_height
+    measure_panel.on_export_height = on_height_export
+
     process_widgets = (range_slider, start_box, end_box, confirm_button, reset_button,
                        save_button, load_button, edit_transform_button,
                        export_button, video_button, cancel_button)
@@ -1420,7 +1578,7 @@ def build_viewer(
         if widget is range_slider:
             return session.timeline.local_num_frames > 1
         if widget is cancel_button:
-            return False
+            return export_state.confirmation is not None
         return True
 
     pages = PageCoordinator(figure.canvas, {
@@ -1440,8 +1598,10 @@ def build_viewer(
         measure = page == "measure"
         theme.show_page(page, editing=mode_state.editing_transform)
         measure_panel.set_busy(pages.busy is not None)
-        measure_panel.cancel_button.set_active(pages.busy == "analysis" and analysis_state.job is not None
-                                              and analysis_state.job.is_alive())
+        measure_panel.cancel_button.set_active((pages.busy == "analysis" and analysis_state.job is not None
+                                              and analysis_state.job.is_alive()) or
+                                              (pages.busy == "analysis_export" and height_export_state.job is not None
+                                               and height_export_state.job.is_alive()))
         measure_panel.current_local_frame = session.timeline.current_local_frame
         measure_panel.frame_count = session.timeline.local_num_frames
         if measure and pages.busy is None:
@@ -1465,6 +1625,8 @@ def build_viewer(
         nav_active = pages.busy is None and not mode_state.editing_transform
         process_button.set_active(nav_active)
         measure_button.set_active(nav_active)
+        open_button.set_active(nav_active and not measure_panel.adding
+                               and on_open_seq is not None and can_open_seq())
         process_button.set_selected(not measure)
         measure_button.set_selected(measure)
         source_name = Path(getattr(session.reader, "path", "SEQ")).name
@@ -1472,6 +1634,7 @@ def build_viewer(
         if measure and session.selection_source_range("process") != session.measure_source_range():
             set_error("Using confirmed range; the Process candidate range is not applied", error=False)
     pages.on_refresh = refresh_page
+    measure_panel.on_interaction_change = pages.refresh
 
     def video_busy(busy):
         pages.set_busy("video_export" if busy else None)
@@ -1485,7 +1648,9 @@ def build_viewer(
 
     video_controller = VideoController(session, dialogs, Path(clips_root), video_job_factory,
         on_busy=video_busy, on_message=video_message)
+    resources.add_cleanup(video_controller.close)
     video_timer = figure.canvas.new_timer(interval=100)
+    resources.add_timer(video_timer)
 
     def poll_video():
         video_controller.poll()
@@ -1508,6 +1673,7 @@ def build_viewer(
     video_button.on_clicked(on_video)
     process_button.on_clicked(lambda event: pages.switch("process"))
     measure_button.on_clicked(lambda event: pages.switch("measure"))
+    open_button.on_clicked(lambda event: on_open_seq() if open_button.active and on_open_seq is not None else None)
 
     slider.on_changed(on_current)
     current_frame_box.on_submit(on_current_frame_submit)
@@ -1525,9 +1691,14 @@ def build_viewer(
     figure.canvas.mpl_connect("resize_event", on_resize)
     figure.canvas.mpl_connect("key_press_event", on_key)
     export_state.timer = figure.canvas.new_timer(interval=100)
+    resources.add_timer(export_state.timer)
     export_state.timer.add_callback(poll_export)
     analysis_state.timer = figure.canvas.new_timer(interval=100)
+    resources.add_timer(analysis_state.timer)
     analysis_state.timer.add_callback(poll_analysis)
+    height_export_state.timer = figure.canvas.new_timer(interval=100)
+    resources.add_timer(height_export_state.timer)
+    height_export_state.timer.add_callback(poll_height_export)
     theme.style_figure_text(figure)
     page_title.set_color(MUTED)
     style_plot(axes)
@@ -1536,6 +1707,27 @@ def build_viewer(
     measure_button.label.set_fontsize(10)
     sync_all_controls()
     show_local(initial_frame)
+
+    def dispose(*, wait=False, preserve_session=False):
+        height_job = height_export_state.job
+        if not preserve_session:
+            if height_job is not None and height_job.is_alive():
+                height_job.cancel()
+                height_job.join(timeout=None if wait else .25)
+            job = export_state.job
+            if job is not None and job.is_alive():
+                job.cancel()
+                job.join(timeout=None if wait else .25)
+        pages.dispose()
+        resources.dispose()
+        if not preserve_session and (height_job is None or not height_job.is_alive()):
+            # Panel workers own independent read-only SQLite handles. Stop them
+            # before final result cleanup, especially on Windows.
+            shutdown_analysis(wait=wait)
+        if resources.errors:
+            message_details["cleanup"] = "\n".join(resources.errors)
+
+    resources.seal()
 
     return ViewerUI(
         figure=figure,
@@ -1576,6 +1768,10 @@ def build_viewer(
         video_button=video_button,
         video_controller=video_controller,
         poll_video=poll_video,
+        open_button=open_button,
+        dispose=dispose,
+        height_export_state=height_export_state,
+        poll_height_export=poll_height_export,
     )
 
 

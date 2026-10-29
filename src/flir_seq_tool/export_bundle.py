@@ -9,6 +9,7 @@ import uuid
 from typing import Any, Callable
 
 from .selection import SelectionDocument, SourceIdentity, build_selection_document
+from .provenance import SourceLink
 from .file_safety import TargetSnapshot, assert_snapshot, validate_write_path
 
 
@@ -55,6 +56,8 @@ def build_clip_document(
         start_timestamp=first, end_timestamp=last,
         display=view_document.display, transform=view_document.transform,
         measurement=view_document.measurement,
+        provenance=(SourceLink(view_document.source, selection.source_start_frame,
+                               selection.frame_count), *view_document.provenance),
     )
 
 

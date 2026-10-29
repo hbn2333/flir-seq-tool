@@ -11,7 +11,10 @@ def raw_metadata():
 
 
 @pytest.fixture(autouse=True)
-def preserve_raw_sources():
+def preserve_raw_sources(request):
+    reference = getattr(request.module, 'SMALL_SEQ', None)
+    if reference is not None and not reference.is_file():
+        pytest.skip(f'Required read-only reference SEQ is unavailable: {reference}')
     before = raw_metadata()
     try:
         yield

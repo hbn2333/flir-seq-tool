@@ -99,7 +99,7 @@ def fake_tk(monkeypatch):
     monkeypatch.setitem(sys.modules, "tkinter", SimpleNamespace(
         Misc=Root, Tk=Root, TclError=TclError,
         filedialog=SimpleNamespace(asksaveasfilename=dialog, askopenfilename=dialog),
-        messagebox=SimpleNamespace(askyesno=dialog, showinfo=dialog),
+        messagebox=SimpleNamespace(askyesno=dialog, askyesnocancel=dialog, showinfo=dialog),
     ))
     return roots, calls, behavior, Root, TclError
 
@@ -217,3 +217,30 @@ def test_video_speed_parent_and_cancel(fake_tk, monkeypatch):
     with ThreadPoolExecutor(max_workers=1) as executor:
         with pytest.raises(RuntimeError, match='main thread'):
             executor.submit(module.SelectionDialogs().choose_video_speed).result()
+
+
+@pytest.mark.parametrize("answer,expected", [(True, "save"), (False, "discard"), (None, "cancel")])
+def test_unsaved_open_three_choices(fake_tk, answer, expected):
+    from flir_seq_tool.selection_dialogs import SelectionDialogs
+    roots, calls, behavior, _, _ = fake_tk
+    behavior.value = answer
+    assert SelectionDialogs().choose_unsaved_action("Candidate range; no results") == expected
+    assert calls[0]["message"] == "Candidate range; no results"
+    assert "Save and open" in calls[0]["detail"]
+    assert roots[0].destroyed
+
+
+def test_open_seq_uses_native_source_dialog_and_rejects_other_extensions(fake_tk, tmp_path):
+    from flir_seq_tool.selection_dialogs import SelectionDialogs
+    roots, calls, behavior, _, _ = fake_tk
+    dialogs = SelectionDialogs()
+    behavior.value = str(tmp_path / "source.SEQ")
+    assert dialogs.choose_seq_open(tmp_path) == Path(behavior.value)
+    assert calls[0]["title"] == "Open SEQ"
+    assert calls[0]["filetypes"] == [("FLIR SEQ", "*.seq")]
+    behavior.value = ""
+    assert dialogs.choose_seq_open(tmp_path) is None
+    behavior.value = str(tmp_path / "setup.selection.json")
+    with pytest.raises(ValueError, match="seq"):
+        dialogs.choose_seq_open(tmp_path)
+    assert all(root.destroyed for root in roots)
