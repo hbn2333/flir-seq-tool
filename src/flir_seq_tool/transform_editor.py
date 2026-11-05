@@ -177,14 +177,14 @@ class TransformEditorUI:
         try:
             fine = (self.draft.angle_deg + 45.0) % 90.0 - 45.0
             self.angle_slider.set_val(fine)
-            self.angle_box.set_val(f"{self.draft.angle_deg:.1f}")
+            self.angle_box.sync_value(f"{self.draft.angle_deg:.1f}")
             crop = self.draft.crop
             for name, value in zip(
                 ("x", "y", "width", "height"),
                 (crop.x, crop.y, crop.width, crop.height),
                 strict=True,
             ):
-                self.crop_boxes[name].set_val(str(value))
+                self.crop_boxes[name].sync_value(value)
             self.selector.extents = (
                 crop.x - 0.5,
                 crop.x + crop.width - 0.5,

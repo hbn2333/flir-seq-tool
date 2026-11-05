@@ -683,6 +683,47 @@ def test_build_viewer_slider_updates_frame_without_changing_color_limits():
     plt.close(ui.figure)
 
 
+@pytest.mark.parametrize("control", ["frame", "range", "measure", "angle", "mouse"])
+def test_slider_updates_do_not_force_full_canvas_draw(control, monkeypatch):
+    session = ViewerSession(FakeTemperatureReader(make_frames(10)))
+    ui = build_viewer(session)
+    try:
+        if control == "measure":
+            ui.pages.switch("measure")
+        elif control == "angle":
+            ui.edit_transform_button._observers.process("clicked", None)
+        ui.figure.canvas.draw()
+        # GUI backends queue draw_idle. Isolate synchronous draws inside the callback.
+        draws = []
+        monkeypatch.setattr(ui.figure.canvas, "draw_idle", lambda: None)
+        monkeypatch.setattr(ui.figure.canvas, "draw", lambda: draws.append(1))
+
+        if control == "range":
+            ui.range_slider.set_val((3, 9))
+            assert ui.start_box.text == "3"
+            assert session.timeline.pending_range == (3, 9)
+        elif control == "angle":
+            ui.transform_editor.angle_slider.set_val(1.5)
+            assert ui.transform_editor.angle_box.text == "1.5"
+            assert ui.transform_editor.draft.angle_deg == 1.5
+        elif control == "mouse":
+            canvas = ui.figure.canvas
+            x, y = ui.slider.ax.transData.transform((3, .5))
+            for event in ("button_press_event", "button_release_event"):
+                canvas.callbacks.process(event, MouseEvent(event, canvas, x, y, button=1))
+            assert canvas.mouse_grabber is None
+        else:
+            ui.slider.set_val(3)
+        if control != "angle":
+            assert session.timeline.current_local_frame == 3
+            assert ui.current_frame_box.text == "3"
+            np.testing.assert_array_equal(ui.image.get_array(), session.reader.frames[3].temperature_c)
+        assert not draws
+    finally:
+        ui.dispose(wait=True)
+        plt.close(ui.figure)
+
+
 def test_edit_transform_switches_single_window_controls_and_keeps_frame_slider():
     ui = build_viewer(ViewerSession(FakeTemperatureReader(make_frames(count=3))))
 

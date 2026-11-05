@@ -44,6 +44,7 @@ class MeasurePanel:
         self._frame = None
         self._analysis_key = None
         self._plot_key = None
+        self._curve_cursors = ()
         self.current_analysis = None
         self.result_axes = None
         self.delta_axes = None
@@ -354,6 +355,7 @@ class MeasurePanel:
     def clear_current_analysis(self):
         self._analysis_key = None
         self._plot_key = None
+        self._curve_cursors = ()
         self.current_analysis = None
         self._frame = None
 
@@ -361,6 +363,7 @@ class MeasurePanel:
         self.result_axes = axes
         self.delta_axes = delta_axes
         self._plot_key = None
+        self._curve_cursors = ()
 
     def _set_view(self, field, value):
         if self._can_edit():
@@ -403,22 +406,23 @@ class MeasurePanel:
                 + (f" ({stats.total_pixels - stats.valid_pixels} excluded)" if stats.valid_pixels < stats.total_pixels else ""))
             self.analysis_note.set_text(self.selected.name[:34] + (
                 " | Based on resampled temperatures" if self.resampled else " | Cropped pixel coordinates"))
-        plot_key = (id(analysis), self.state.settings.result_view, self.state.settings.frame_view,
-                    self.state.settings.profile_direction, self.state.settings.curve_metric,
-                    self.state.status, id(self.state.result_store), self.current_local_frame,
-                    self.state.settings)
+        settings = self.state.settings
+        curves = settings.result_view == "curves"
+        # The frame affects the curve cursors but not the series read from the store.
+        frame_key = None if curves else (id(analysis), self.current_local_frame)
+        plot_key = (settings, self.state.status, id(self.state.result_store), self.frame_count, frame_key)
         if self.result_axes is not None and plot_key != self._plot_key:
             self._plot_key = plot_key
+            self._curve_cursors = ()
             ax = self.result_axes
-            curves = self.state.settings.result_view == "curves"
             ax.set_position(MEASURE_CURVE_TEMP_RECT if curves else MEASURE_RESULT_RECT)
             if self.delta_axes is not None:
                 self.delta_axes.set_visible(curves and self.visible)
                 self.delta_axes.set_position(MEASURE_CURVE_DELTA_RECT)
-            if self.state.settings.result_view == "curves":
+            if curves:
                 if self.state.status == "complete" and self.state.result_store is not None and self.delta_axes is not None:
-                    draw_frame_curves(ax, self.delta_axes, self.state.result_store, self.state.settings,
-                                      self.current_local_frame, self.frame_count)
+                    self._curve_cursors = draw_frame_curves(
+                        ax, self.delta_axes, self.state.result_store, settings, self.current_local_frame, self.frame_count)
                 else:
                     messages = {"stale": "Inputs changed — Calculate again", "cancelled": "Cancelled — Calculate again",
                                 "failed": "Analysis failed — Calculate again"}
@@ -428,19 +432,23 @@ class MeasurePanel:
                             result_ax.set_axis_off()
                             result_ax.text(.5, .5, messages.get(self.state.status, "Not calculated"),
                                            transform=result_ax.transAxes, ha="center", va="center")
-            elif self.state.settings.result_view == 'height':
+            elif settings.result_view == 'height':
                 self.height_panel.draw(ax, self.delta_axes, self._frame)
             elif analysis is None:
                 ax.clear()
                 ax.set_axis_off()
                 ax.text(.5, .5, "Select or add an ROI", transform=ax.transAxes, ha="center", va="center")
-            elif self.state.settings.frame_view == "distribution":
+            elif settings.frame_view == "distribution":
                 draw_distribution(ax, analysis.histogram)
             else:
-                draw_profile(ax, getattr(analysis, self.state.settings.profile_direction))
+                draw_profile(ax, getattr(analysis, settings.profile_direction))
             for result_ax in (ax, self.delta_axes):
                 if result_ax is not None:
                     style_plot(result_ax)
+        else:
+            for cursor in self._curve_cursors:
+                if cursor.get_xdata()[0] != self.current_local_frame:
+                    cursor.set_xdata([self.current_local_frame] * 2)
         self.figure.canvas.draw_idle()
 
     def _sync_analysis_controls(self):

@@ -196,12 +196,14 @@ def largest_valid_rectangle(mask: np.ndarray) -> CropRect:
 
     for row in range(height):
         column_heights = np.where(values[row], column_heights + 1, 0)
+        # Convert each row once for the stack's repeated scalar lookups.
+        heights = column_heights.tolist()
+        heights.append(0)
         stack: list[int] = []
-        for column in range(width + 1):
-            current_height = int(column_heights[column]) if column < width else 0
-            while stack and int(column_heights[stack[-1]]) > current_height:
+        for column, current_height in enumerate(heights):
+            while stack and heights[stack[-1]] > current_height:
                 bar = stack.pop()
-                rectangle_height = int(column_heights[bar])
+                rectangle_height = heights[bar]
                 left = stack[-1] + 1 if stack else 0
                 rectangle_width = column - left
                 area = rectangle_height * rectangle_width

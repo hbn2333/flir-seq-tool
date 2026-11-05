@@ -23,6 +23,7 @@ def draw_profile(ax, result):
 
 
 def draw_frame_curves(temp_ax, delta_ax, store, settings, current_local, frame_count):
+    """Draw both frame curves and return their current-frame lines."""
     for ax in (temp_ax, delta_ax):
         ax.clear()
         ax.set_axis_on()
@@ -37,8 +38,9 @@ def draw_frame_curves(temp_ax, delta_ax, store, settings, current_local, frame_c
                 ax.plot(x, y, color=roi.color, label=(roi.name[:24] if first else "_nolegend_"),
                         marker="o" if len(x) == 1 else None)
                 first = False
+    cursors = []
     for ax in (temp_ax, delta_ax):
-        ax.axvline(current_local, color="black", linestyle="--", linewidth=.8)
+        cursors.append(ax.axvline(current_local, color="black", linestyle="--", linewidth=.8))
         ax.set_xlim((-.5, .5) if frame_count == 1 else (0, frame_count - 1))
         ax.tick_params(labelsize=8)
         if checked:
@@ -53,6 +55,7 @@ def draw_frame_curves(temp_ax, delta_ax, store, settings, current_local, frame_c
     delta_ax.set(xlabel="Local frame in confirmed range", ylabel="ΔT (°C)")
     delta_ax.xaxis.label.set_fontsize(8)
     delta_ax.yaxis.label.set_fontsize(8)
+    return tuple(cursors)
 
 
 def build_report_figure(snapshot):

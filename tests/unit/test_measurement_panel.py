@@ -4,6 +4,7 @@ from matplotlib.backend_bases import MouseEvent, KeyEvent
 import pytest
 
 from flir_seq_tool.measurement_models import MeasurementSettings, Roi
+from flir_seq_tool.measurement_store import ResultStore
 from flir_seq_tool.models import TemperatureFrame
 import numpy as np
 
@@ -229,6 +230,61 @@ def test_drag_coalesces_current_analysis_and_release_commits_final_position(make
     ui.pages.switch("process")
     panel.flush_drag()
     assert not panel.drag_pending
+
+
+def test_frame_curves_navigation_reuses_plotted_data_and_moves_both_cursors(make_measure_ui, tmp_path, monkeypatch):
+    ui = make_measure_ui()
+    panel = ui.measure_panel
+    roi = Roi("r1", "Sample", 0, 0, 2, 2, "#123456", True)
+    panel.state.settings = MeasurementSettings((roi,), roi.id, result_view="curves")
+    store = ResultStore.create(tmp_path)
+    panel.state.result_store = store
+    frame_count = ui.session.timeline.local_num_frames
+    store.append_rows(
+        dict(roi_id=roi.id, local_frame=i, source_frame=i, timestamp="2026-10-22T00:00:00",
+             relative_s=i * .02, mean_c=4. + i, min_c=1. + i, max_c=7. + i,
+             delta_c=6., std_c=2., valid_pixels=4, total_pixels=4)
+        for i in range(frame_count)
+    )
+    key = ui.session.analysis_key()
+    store.complete(expected_rows=frame_count, key_json=key.to_json())
+    panel.state.result_key = key
+    panel.state.status = "complete"
+    queries = []
+    iter_plot_segments = store.iter_plot_segments
+
+    def track_plot_query(roi_id, metric, start, end):
+        queries.append(metric)
+        return iter_plot_segments(roi_id, metric, start, end)
+
+    monkeypatch.setattr(store, "iter_plot_segments", track_plot_query)
+    ui.pages.switch("measure")
+    axes = (panel.result_axes, panel.delta_axes)
+    original_lines = [tuple(ax.lines) for ax in axes]
+    assert set(queries) == {"mean_c", "delta_c"}
+    queries.clear()
+
+    for frame_index in (2, 4):
+        ui.slider.set_val(frame_index)
+        assert not queries
+        for ax, lines in zip(axes, original_lines):
+            assert tuple(ax.lines) == lines
+            assert list(ax.lines[-1].get_xdata()) == [frame_index, frame_index]
+
+    click_button(ui, panel.min_button)
+    assert queries == ["min_c", "delta_c"]
+    assert list(panel.result_axes.lines[0].get_ydata()) == [1. + i for i in range(frame_count)]
+    assert list(panel.result_axes.lines[-1].get_xdata()) == [4, 4]
+
+    ui.pages.switch("process")
+    ui.range_slider.set_val((1, 3))
+    click_button(ui, ui.confirm_button)
+    ui.pages.switch("measure")
+    assert panel.state.status == "stale"
+    assert queries == ["min_c", "delta_c"]
+    for ax in axes:
+        assert not ax.lines
+        assert ax.texts[0].get_text() == "Inputs changed — Calculate again"
 
 
 def test_render_measure_preview(make_measure_ui, tmp_path):

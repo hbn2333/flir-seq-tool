@@ -825,7 +825,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         refresh_transform_status()
         updating = True
         try:
-            current_frame_box.set_val(str(local_frame))
+            current_frame_box.sync_value(local_frame)
         finally:
             updating = False
         if sync_slider:
@@ -845,10 +845,10 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
             set_widget_domain(slider, local_max)
             set_widget_domain(range_slider, local_max)
             slider.set_val(session.timeline.current_local_frame)
-            current_frame_box.set_val(str(session.timeline.current_local_frame))
+            current_frame_box.sync_value(session.timeline.current_local_frame)
             range_slider.set_val(session.timeline.pending_range)
-            start_box.set_val(str(session.timeline.pending_start))
-            end_box.set_val(str(session.timeline.pending_end))
+            start_box.sync_value(session.timeline.pending_start)
+            end_box.sync_value(session.timeline.pending_end)
         finally:
             updating = False
         if mode_state.editing_transform:
@@ -877,12 +877,13 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         except (ValueError, OSError, RuntimeError) as exc:
             updating = True
             try:
-                current_frame_box.set_val(str(session.timeline.current_local_frame))
+                current_frame_box.sync_value(session.timeline.current_local_frame)
             finally:
                 updating = False
             set_error(str(exc))
 
     def on_range(values: tuple[float, float]) -> None:
+        nonlocal updating
         if updating:
             return
         if mode_state.editing_transform:
@@ -903,7 +904,12 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         target = new_start if new_start != old_start else new_end
         invalidate_export_confirmation()
         mark_selection_dirty()
-        sync_all_controls()
+        updating = True
+        try:
+            start_box.sync_value(new_start)
+            end_box.sync_value(new_end)
+        finally:
+            updating = False
         show_local(target)
 
     def submit_endpoint(text: str, endpoint: str) -> None:

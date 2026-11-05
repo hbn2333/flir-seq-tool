@@ -132,6 +132,26 @@ class ThemedTextBox(TextBox):
         self.label.set_color(MUTED)
         self._style()
 
+    def sync_value(self, value):
+        """Refresh a model-owned value as part of the caller's next draw."""
+        value = str(value)
+        if self.text == value:
+            return
+        if self.capturekeystrokes:
+            self.set_val(value)
+        else:
+            # TextBox.set_val draws the entire canvas to position the cursor.
+            self.text_disp.set_text(value)
+            self.cursor.set_visible(False)
+
+    def stop_typing(self):
+        if self.capturekeystrokes:
+            super().stop_typing()
+        elif self.cursor.get_visible():
+            # Clicking elsewhere calls stop_typing on every idle text box.
+            self.cursor.set_visible(False)
+            self.ax.figure.canvas.draw_idle()
+
     def set_active(self, active):
         super().set_active(active)
         if hasattr(self, "text_disp"):
