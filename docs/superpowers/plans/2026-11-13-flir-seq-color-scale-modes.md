@@ -355,7 +355,7 @@ if outcome.status == "complete" and matches:
 - 修改 `src/flir_seq_tool/viewer.py`、`viewer_window.py`、`viewer_layout.py`、`selection_dialogs.py`、`measurement_panel.py`。
 - 修改 `tests/unit/test_viewer.py`、`test_viewer_window.py`、`test_measurement_panel.py`、`test_selection_dialogs.py`、`tests/unit/conftest.py`。
 
-- [ ] **1. 写控件事件 RED。** 通过真实 Matplotlib 控件 observers 修改模式、两框文本、Apply、Auto range、Cancel。输入 change 只更新两框草稿，任一字段有草稿时 poll/refresh/失焦均保留两框。Per frame 禁用编辑，回 Fixed 恢复草稿。变换编辑期间模式和温标输入不可改，显示冻结范围。
+- [x] **1. 写控件事件 RED。** 通过真实 Matplotlib 控件 observers 修改模式、两框文本、Apply、Auto range、Cancel。输入 change 只更新两框草稿，任一字段有草稿时 poll/refresh/失焦均保留两框。Per frame 禁用编辑，回 Fixed 恢复草稿。变换编辑期间模式和温标输入不可改，显示冻结范围。
 
 ```python
 panel.min_box.set_val("21")
@@ -369,13 +369,13 @@ assert (state.settings.vmin_c, state.settings.vmax_c) == (21, 46)
 
 panel 使用 `min_box/max_box/fixed_button/per_frame_button/apply_button/auto_button/cancel_button/status_text` 这些可测试属性。新输入框同步只在无草稿且未 capturekeystrokes 时改 text artist，避免已有 `sync_value()` 在输入中调用 set_val 而提交/改写草稿。
 
-- [ ] **2. 写工作流 RED。** 用受控 job factory 验证候选范围不启动扫描、Confirm/Reset/Apply 后新 scope、ROI 操作不改变 scope、per_frame 换帧不改变保存签名、温标不使已完成测量/高度结果 stale、用户 Cancel 与内部恢复区别。重任务的直接回调入口也要测试，不能只断言按钮颜色或 active。
+- [x] **2. 写工作流 RED。** 用受控 job factory 验证候选范围不启动扫描、Confirm/Reset/Apply 后新 scope、ROI 操作不改变 scope、per_frame 换帧不改变保存签名、温标不使已完成测量/高度结果 stale、用户 Cancel 与内部恢复区别。重任务的直接回调入口也要测试，不能只断言按钮颜色或 active。
 
 ```powershell
 & .\.packaging\venv\Scripts\python.exe -B -m pytest tests/unit/test_color_scale_panel.py tests/unit/test_color_scale_workflow.py tests/unit/test_viewer_window.py -q --tb=short -p no:cacheprovider --basetemp .packaging/tmp/scale-task6-red
 ```
 
-- [ ] **3. 接线 session 与正常绘制。** `ViewerSession` 新增 `color_scale` 与惰性建立的 `color_controller`，在恢复配置后设置 Context。`frame_at()` 去掉首次帧百分位初始化，改为对实际变换矩阵 observe；保存和签名统一使用 `state.settings_for_selection()` 对应 Process/Measure scope 的快照；渲染使用实际 color_limits。显式 `--vmin/--vmax` 与三参数 DisplaySettings 按 manual 初始化。调用颜色归一化时只在 bounds 变化后更新，随后一次 draw_idle。
+- [x] **3. 接线 session 与正常绘制。** `ViewerSession` 新增 `color_scale` 与惰性建立的 `color_controller`，在恢复配置后设置 Context。`frame_at()` 去掉首次帧百分位初始化，改为对实际变换矩阵 observe；保存和签名统一使用 `state.settings_for_selection()` 对应 Process/Measure scope 的快照；渲染使用实际 color_limits。显式 `--vmin/--vmax` 与三参数 DisplaySettings 按 manual 初始化。调用颜色归一化时只在 bounds 变化后更新，随后一次 draw_idle。
 
 ```python
 limits = session.color_scale.observe_frame(next_frame.temperature_c)
@@ -386,8 +386,8 @@ scale_panel.sync()
 
 控制器不调用 `pages.set_busy()`。UI timer 每约 100 ms poll，并注册到 UIResources。页面切换、show_local 和候选拖动只刷新显示。确认范围/应用变换/载入配置时更新 context 并 reconcile。编辑入口先 freeze_preview + suspend('transform')，退出时 resume_preview + resume('transform') 并 observe 当前帧。
 
-- [ ] **4. 在所有重任务入口和可用性上接入扫描门控。** Calculate、原生 SEQ、MP4、全量 CSV、height/zones CSV 进入时检查 `blocks_heavy_tasks`，给等待或取消提示。当前帧 PNG 独立允许，`can_export_analysis(kind)` 与 MeasurePanel 分别询问 CSV/PNG，可保持 kind 默认值兼容现有调用。任务真的启动后 set_heavy_busy(True)，结束/失败/取消的 finally 中恢复 False。手动 Apply/切 Per frame 后等待退休扫描 worker 退出再允许重任务。
-- [ ] **5. 实现窗口两阶段激活与清理，并补 RED/GREEN。** `build_viewer()` 增加受控 job 注入和 `defer_color_scan=False` 参数。ViewerWindow 的 _prepare 只恢复并读首帧，_install 使用 defer=True，首次 draw 成功且 current/ui 事务提交后才 activate。打开模态框前 suspend('open')，finally 对仍存活旧会话 resume('open')；取消、坏源和安装失败都可恢复。未 Apply 的 Min/Max 用明确的应用/放弃/取消选择处理，通过新 `choose_color_draft_action()` 对话框；Apply 失败则停留旧文件，放弃只影响草稿，保存仍仅保存已生效配置。
+- [x] **4. 在所有重任务入口和可用性上接入扫描门控。** Calculate、原生 SEQ、MP4、全量 CSV、height/zones CSV 进入时检查 `blocks_heavy_tasks`，给等待或取消提示。当前帧 PNG 独立允许，`can_export_analysis(kind)` 与 MeasurePanel 分别询问 CSV/PNG，可保持 kind 默认值兼容现有调用。任务真的启动后 set_heavy_busy(True)，结束/失败/取消的 finally 中恢复 False。手动 Apply/切 Per frame 后等待退休扫描 worker 退出再允许重任务。
+- [x] **5. 实现窗口两阶段激活与清理，并补 RED/GREEN。** `build_viewer()` 增加受控 job 注入和 `defer_color_scan=False` 参数。ViewerWindow 的 _prepare 只恢复并读首帧，_install 使用 defer=True，首次 draw 成功且 current/ui 事务提交后才 activate。打开模态框前 suspend('open')，finally 对仍存活旧会话 resume('open')；取消、坏源和安装失败都可恢复。未 Apply 的 Min/Max 用明确的应用/放弃/取消选择处理，通过新 `choose_color_draft_action()` 对话框；Apply 失败则停留旧文件，放弃只影响草稿，保存仍仅保存已生效配置。
 
 UI-only dispose 调用 detach，保留会话控制器对退休 job 的所有权。最终 `_OwnedSession.close()` 和 standalone 关闭路径先 `color_controller.close(wait=True)`，再释放现有 reader。close(wait=False) 的最终等待在已有 launch finally 继续完成。失败构建只有已注册 timer/widget 被 UIResources 回收，未激活候选不会遗留新线程。
 
@@ -399,7 +399,7 @@ old.close()
 
 上例用于成功切源提交处；首次 start 和回退重建也按相同提交原则激活。状态和草稿由 session 持有，因此 rollback 不丢草稿或用户取消状态。
 
-- [ ] **6. 修正测试生命周期并验证。** 普通旧 UI 用例显式设置 manual 或注入受控 job，不以真实 SDK 扫描 fake 路径。真正测试默认行为的专用用例维持 auto。`FileBackedFakeReader` 和 `SyntheticReader` 构造会写文件，不能作为独立扫描 reader factory；任务 3 使用纯读 fake。`tests/unit/conftest.py::make_measure_ui` 等 teardown 改为 `ui.dispose(wait=True)` 后 `plt.close()`。仅将默认行为断言按新设计更新，保留既有温标稳定和导出安全断言。
+- [x] **6. 修正测试生命周期并验证。** 普通旧 UI 用例显式设置 manual 或注入受控 job，不以真实 SDK 扫描 fake 路径。真正测试默认行为的专用用例维持 auto。`FileBackedFakeReader` 和 `SyntheticReader` 构造会写文件，不能作为独立扫描 reader factory；任务 3 使用纯读 fake。`tests/unit/conftest.py::make_measure_ui` 等 teardown 改为 `ui.dispose(wait=True)` 后 `plt.close()`。仅将默认行为断言按新设计更新，保留既有温标稳定和导出安全断言。
 
 完整运行新增 scale UI/workflow、viewer、window、pages、measurement_panel、dialogs 套件。通过后提交 `feat: integrate fixed and adaptive color scale controls`。
 
