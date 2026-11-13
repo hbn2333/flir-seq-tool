@@ -27,4 +27,10 @@
 
 ## 交付验证
 
-额外长信息窗口缩放回归与新文件夹 EXE 冻结验收在完成后补记。最终软件目录使用 `dist/portable/process-layout-20261114/FLIR_SEQ_Tool`，保留先前软件目录。原生窗口人工试用和独立干净电脑验收留给用户；本轮不合并 main、不推送 GitHub、不更新 Release。
+额外长信息窗口缩放回归为 **6 passed、150 deselected**，覆盖普通/编辑及 100/150/200 DPI；日志为 `.packaging/process-layout-final-longmessages.log`。针对修改范围的检查均已完成，已发现的问题全部修复并复审关闭；没有把初轮三项失败记录改写为通过。
+
+最终软件目录为 `dist/portable/process-layout-20261114/FLIR_SEQ_Tool`，构建源码提交 `a372c7a`，构建时工作区干净，先前软件目录全部保留。新 EXE 运行只读最小真实 SEQ 的 **14 项冻结诊断全部 passed**，包括 SDK、温标/色条、v5、变换/ROI、高度 CSV、同窗切源、原生提取、固定及逐帧 MP4 完整解码与取消。报告为 `.packaging/process-layout-frozen/diagnostics.json`。
+
+再次核对 62 个构建源码文件和 2015 个包内文件 SHA256，与 manifest 一致；原七份 raw 清单及单独记录的 Q1 大小/mtime 均保持不变。核验记录为 `.packaging/process-layout-bundle-verification.json`。构建退出 0；日志保留一条 `scipy.special._cdflib` hidden import 警告，无构建错误，实际冻结诊断功能全部通过。
+
+交付 EXE 为 `D:\carbonfoam\infrared\dist\portable\process-layout-20261114\FLIR_SEQ_Tool\FLIR_SEQ_Tool.exe`，保留整个文件夹使用。原生窗口人工试用和独立干净电脑验收留给用户；本轮不合并 main、不推送 GitHub、不更新 Release。最终验收文档提交不改变包内生产源码。
