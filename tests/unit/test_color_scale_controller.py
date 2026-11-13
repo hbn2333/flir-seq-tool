@@ -353,3 +353,39 @@ def test_partial_start_failure_keeps_worker_then_reports_failure_after_reap(rig,
     assert not controller.blocks_heavy_tasks
     assert controller.status == 'failed' and 'partially' in controller.error
     assert not state.fixed_ready and len(jobs) == 1
+
+
+def test_loaded_context_retires_previous_epoch_before_starting_replacement(rig):
+    controller, state, jobs, _ = start(rig)
+    context = controller.context
+    previous = jobs[0]
+    state.load_settings(state.settings)
+    controller.load_context(context)
+    assert previous.cancelled
+    assert len(jobs) == 1
+    previous.finish()
+    controller.poll()
+    assert not state.fixed_ready
+    assert len(jobs) == 2
+    assert jobs[1].request.generation > previous.request.generation
+    assert jobs[1].request.context == context
+    jobs[1].finish()
+    controller.poll()
+    assert controller.status == 'complete' and state.fixed_ready
+
+
+def test_loaded_context_keeps_internal_suspension_until_resumed(rig):
+    controller, state, jobs, _ = start(rig)
+    context = controller.context
+    controller.suspend('load')
+    jobs[0].finish('cancelled')
+    controller.poll()
+    state.load_settings(state.settings)
+    controller.load_context(context)
+    controller.poll()
+    assert controller.status == 'paused'
+    assert len(jobs) == 1
+    controller.resume('load')
+    assert controller.status == 'scanning'
+    assert len(jobs) == 2
+    controller.close(wait=True)

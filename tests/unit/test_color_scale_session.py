@@ -247,3 +247,51 @@ def test_frozen_preview_retains_actual_bounds_until_applied_frame_is_observed(tm
     session.color_scale.resume_preview()
     session.frame_at(1)
     assert session.color_limits == ColorLimits(10, 57)
+
+
+@pytest.mark.parametrize('prior_status', ['complete', 'cancelled'])
+@pytest.mark.parametrize('loaded_policy', ['unresolved_auto', 'ready_auto', 'manual', 'per_frame'])
+def test_explicit_load_resets_scan_attempt_without_changing_loaded_policy(tmp_path, prior_status, loaded_policy):
+    from dataclasses import replace
+    from flir_seq_tool.selection import DisplaySettings
+    session = session_at(tmp_path)
+    session.frame_at(0)
+    unresolved = session.selection_document()
+    jobs = []
+    def factory(request):
+        job = ControlledColorJob(request)
+        jobs.append(job)
+        return job
+    controller = session.get_color_controller(job_factory=factory)
+    controller.activate()
+    if prior_status == 'cancelled':
+        controller.cancel()
+        jobs[0].finish('cancelled')
+    else:
+        jobs[0].finish()
+    controller.poll()
+    assert controller.status == prior_status
+    scope = controller.context.scope
+    displays = {
+        'unresolved_auto': unresolved.display,
+        'ready_auto': DisplaySettings('magma', -3, 103, fixed_source='auto', auto_scope=scope),
+        'manual': DisplaySettings('magma', 5, 80),
+        'per_frame': DisplaySettings('magma', 5, 80, scale_mode='per_frame', fixed_source='auto'),
+    }
+    display = displays[loaded_policy]
+    session.apply_selection_document(replace(unresolved, display=display), path=tmp_path / 'loaded.json')
+    controller.poll()
+    assert session.color_scale.settings == display
+    if loaded_policy == 'unresolved_auto':
+        assert len(jobs) == 2
+        assert controller.status == 'scanning'
+        assert jobs[1].request.context == jobs[0].request.context
+        jobs[1].finish()
+        controller.poll()
+        assert session.color_scale.fixed_ready
+        assert controller.status == 'complete'
+    else:
+        assert len(jobs) == 1
+        assert controller.status == ('complete' if loaded_policy == 'ready_auto' else 'idle')
+        assert not session.has_unsaved_changes()
+    session.close_color_scale(wait=True)

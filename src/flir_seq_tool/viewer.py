@@ -171,14 +171,17 @@ class ViewerSession:
                                  *(source_range or self.measure_source_range()),
                                  transform or self.applied_transform)
 
-    def _commit_color_context(self, context) -> None:
+    def _commit_color_context(self, context, *, settings_loaded=False) -> None:
         if context is None:
             return
         self._cached_source_identity = context.source_identity
         self._color_context = context
         self.color_scale.set_scope(context.scope)
         if self._color_controller is not None:
-            self._color_controller.set_context(context)
+            if settings_loaded:
+                self._color_controller.load_context(context)
+            else:
+                self._color_controller.set_context(context)
 
     def get_color_controller(self, *, job_factory=None) -> ColorScaleController:
         """Return the lazy session owner; activation belongs to the committed UI."""
@@ -486,7 +489,7 @@ class ViewerSession:
         self.measurement.settings = document.measurement
         self.provenance = document.provenance
         self.selection_dirty = False
-        self._commit_color_context(color_context)
+        self._commit_color_context(color_context, settings_loaded=True)
         self._establish_saved_signatures()
         self.selection_path = Path(path)
         self.release_measurement_store(previous)

@@ -95,11 +95,18 @@ class ColorScaleController:
             self._job.cancel()
 
     def set_context(self, context):
+        self._set_context(context, settings_loaded=False)
+
+    def load_context(self, context):
+        """Begin a loaded configuration's scan epoch without changing its policy."""
+        self._set_context(context, settings_loaded=True)
+
+    def _set_context(self, context, *, settings_loaded):
         if not isinstance(context, ColorScaleContext):
             raise ValueError('context must be a ColorScaleContext')
         if self._closed:
             return
-        if context != self._context:
+        if settings_loaded or context != self._context:
             self._invalidate()
             self._context = context
             self._cancelled_scope = None
