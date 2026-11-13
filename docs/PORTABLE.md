@@ -1,6 +1,6 @@
 # Windows 便携版构建与验收
 
-当前状态：按维护者 2026-10-28 的要求发布 [Windows 便携预览版](https://github.com/hbn2333/flir-seq-tool/releases/tag/portable-preview-2026.10.28)。本机迁移诊断已通过，独立干净电脑和原生文件选择框仍待人工验收。SDK 再分发许可歧义及 FFmpeg 等发行材料尚未核清，公开预发布不表示这些事项已经解决，也不豁免许可义务。
+当前版本为 [Windows 便携预览版 2026.11.14](https://github.com/hbn2333/flir-seq-tool/releases/tag/portable-preview-2026.11.14)，包含高度分析、同窗切源、固定/逐帧温标及 Process 大图布局。已通过本机自动诊断和用户本地试用，独立干净电脑验收仍待完成。SDK 再分发许可歧义及 FFmpeg 等发行材料尚未核清，公开预发布不表示这些事项已经解决，也不豁免许可义务。
 
 构建环境、临时文件和软件包都在项目内；既有 Python、SDK、Tecplot 安装只读，不修改系统 PATH 或注册表。
 
@@ -57,6 +57,6 @@ SDK 安装包 EULA 限制再分发，而 SDK 附带技术文档又提供运行�
 
 FFmpeg 9.0.2 构建为包含 libx264 的 GPLv3 程序。随包许可文本不等于完成全部义务，仍需整理准确对应的源码、依赖和构建材料。还需核对 Python、Tk、VC++ 等第三方声明与分发条件。
 
-本次使用日期标签 `portable-preview-2026.10.28` 标记便携发行预览，Python 包版本保留 0.1.0。预发布与正式版同样受上述许可条件约束；本次公开不构成第三方授权确认。Release 附件为便携版 ZIP、SHA256 及更新说明；二进制不提交到 Git 源码目录，自动生成的源码压缩包不包含可执行软件包。
+本次使用日期标签 `portable-preview-2026.11.14` 标记便携发行预览，Python 包版本保留 0.1.0。初始 `portable-preview-2026.10.28` 附件作为历史版本保留。预发布与正式版同样受上述许可条件约束；本次公开不构成第三方授权确认。Release 附件为便携版 ZIP 与 SHA256，更新说明见 Release 正文；二进制不提交到 Git 源码目录，自动生成的源码压缩包不包含可执行软件包。
 
 依据：[GitHub Release 说明](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)、[FFmpeg 文档](https://ffmpeg.org/ffmpeg.html)、[PyInstaller 使用文档](https://pyinstaller.org/en/stable/usage.html)。SDK 许可依据为本地 2026.1.2 安装包 EULA 及其 `python/doc/_sources/redistribution.rst.txt`，保留原许可文件，不在仓库公开复制其全文。

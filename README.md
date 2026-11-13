@@ -27,7 +27,7 @@
 
 暂不支持独立测温点、实验加热零点设置或外部传感器时间对齐。
 
-高度分析、同窗口切源和新的温标模式属于后续源码更新；下方链接的 2026.10.28 便携预览版尚未包含这些功能。
+本页对应 2026.11.14 便携预览版，已包含高度分析、同窗口切源、新温标模式与 Process 大图布局。
 
 ## 环境与安装
 
@@ -39,7 +39,7 @@
 
 默认结果写入软件目录的 `output/clips`、`output/analysis`、`output/selections`；临时文件和日志位于 `cache`、`logs`。整个文件夹应放在有写权限的位置，不能只移动 EXE。原始数据不随包分发。
 
-[下载 Windows x64 便携预览版](https://github.com/hbn2333/flir-seq-tool/releases/tag/portable-preview-2026.10.28)。此版本已做本机迁移测试，尚未在独立干净电脑上验收；双击选文件、取消与拖入文件仍需人工验证。
+[下载 Windows x64 便携预览版（2026.11.14）](https://github.com/hbn2333/flir-seq-tool/releases/tag/portable-preview-2026.11.14)。此版本已通过本机自动诊断和用户本地试用，尚未在独立干净电脑上验收。旧版附件保留在 Release 历史中。
 
 FLIR SDK 是专有第三方依赖，仓库公开不代表 SDK 获得开源授权。SDK 再分发条款的歧义、FFmpeg 对应源码及其他发行材料仍待核实，预发布同样受第三方许可约束。详情见 [便携版构建与验收](docs/PORTABLE.md)。
 
