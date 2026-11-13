@@ -250,3 +250,26 @@ def test_invalid_mode_is_atomic_and_empty_apply_is_noop():
     with pytest.raises(ValueError):
         state.select_mode('other')
     assert state.settings is saved
+
+
+@pytest.mark.parametrize('source', ['auto', 'manual'])
+def test_discard_draft_preserves_policy_snapshot_and_cached_auto(source):
+    state = auto_state()
+    state.accept_auto(SCOPE, ColorLimits(20, 50))
+    if source == 'manual':
+        state.apply_manual(21, 46)
+    state.observe_frame([[22, 40]])
+    settings = state.settings
+    snapshot = state.render_snapshot()
+    state.edit_bounds('unfinished', ' 47 ')
+    state.discard_draft()
+    assert state.draft_bounds is None
+    assert not state.draft_pending
+    assert state.settings is settings
+    assert state.render_snapshot() is snapshot
+    state.discard_draft()  # Discarding an empty draft is also a no-op.
+    assert state.settings is settings
+    assert state.render_snapshot() is snapshot
+    state.restore_auto()
+    assert state.fixed_ready
+    assert state.render_snapshot().limits == ColorLimits(20, 50)

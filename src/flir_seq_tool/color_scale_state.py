@@ -106,6 +106,10 @@ class ColorScaleState:
             raise ValueError('draft bounds must be strings')
         self._draft_bounds = (min_text, max_text)
 
+    def discard_draft(self) -> None:
+        """Drop uncommitted text without changing applied or effective scale."""
+        self._draft_bounds = None
+
     def apply_draft(self) -> None:
         if self.draft_bounds is None:
             return
