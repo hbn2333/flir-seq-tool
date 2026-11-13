@@ -271,3 +271,55 @@ def test_pending_hint_survives_draw_time_error_truncation(rig):
     assert len(displayed.splitlines()) <= 2
     assert invalid in details
     assert state.draft_bounds == (invalid, '45.0')
+
+@pytest.mark.parametrize('dpi', [100, 150, 200])
+def test_precise_bounds_fit_and_long_draft_has_local_viewport(rig, dpi):
+    panel, state, *_ = rig
+    panel.figure.set_dpi(dpi)
+    state.apply_manual(22.586210250854492, 50.18052673339844)
+    panel.sync()
+    panel.figure.canvas.draw()
+    renderer = panel.figure.canvas.get_renderer()
+    for box in (panel.min_box, panel.max_box):
+        bounds = box.text_disp.get_window_extent(renderer)
+        assert box.ax.bbox.contains(bounds.x0, bounds.y0)
+        assert box.ax.bbox.contains(bounds.x1, bounds.y1)
+    draft = 'invalid-' * 100
+    panel.min_box.set_val(draft)
+    assert panel.min_box.text == draft
+    assert panel.min_box.text_disp.get_clip_on()
+    assert panel.min_box.cursor.get_clip_on()
+    from matplotlib.backend_bases import KeyEvent
+    panel.min_box.begin_typing()
+    for key in ('home', 'end', 'left', 'right', 'home'):
+        panel.min_box._keypress(KeyEvent('key_press_event', panel.figure.canvas, key=key))
+        segment = panel.min_box.cursor.get_segments()[0]
+        assert panel.min_box.ax.bbox.x0 <= segment[0, 0] <= panel.min_box.ax.bbox.x1
+    assert panel.min_box.text == draft
+
+
+def test_scrolled_draft_restores_readable_values_after_mode_switch(rig, monkeypatch):
+    panel, state, *_ = rig
+    draft = 'invalid-' * 100
+    panel.min_box.set_val(draft)
+    panel.min_box.begin_typing()
+    panel.min_box.cursor_index = len(draft)
+    draws = []
+    monkeypatch.setattr(panel.figure.canvas, 'draw_idle', lambda: None)
+    monkeypatch.setattr(panel.figure.canvas, 'draw', lambda: draws.append(1))
+    panel.min_box._rendercursor()
+    assert panel.min_box.text_disp.get_position()[0] < 0
+    assert not draws
+    click(panel.per_frame_button)
+    assert float(panel.min_box.text) == 20
+    assert panel.min_box.text_disp.get_position()[0] == .05
+    click(panel.fixed_button)
+    assert panel.min_box.text == draft
+    assert panel.min_box.text_disp.get_position()[0] == .05
+    assert state.draft_bounds[0] == draft
+
+def test_empty_scale_draft_keeps_visible_cursor(rig):
+    panel, *_ = rig
+    panel.min_box.set_val('')
+    segment = panel.min_box.cursor.get_segments()[0]
+    assert segment[1, 1] > segment[0, 1]

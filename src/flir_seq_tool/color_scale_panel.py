@@ -4,6 +4,44 @@ from .viewer_layout import BoundedMessage, COLOR_SCALE_RECTS, label_above
 from .viewer_theme import MUTED, ThemedButton, ThemedTextBox, style_text
 
 
+class ScaleTextBox(ThemedTextBox):
+    """Clipped scrolling viewport that retains the exact numeric draft."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for artist in (self.text_disp, self.cursor):
+            artist.set_clip_on(True)
+            artist.set_clip_path(self.ax.patch)
+        self.text_disp.set_parse_math(False)
+
+    def reset_viewport(self):
+        self.text_disp.set_x(.05)
+        self.cursor.set_visible(False)
+
+    def _rendercursor(self):
+        # Measure without TextBox's synchronous canvas draw. Model refreshes
+        # never call this method, preserving continuous slider performance.
+        renderer = self.ax.figure.canvas.get_renderer()
+        width = renderer.get_text_width_height_descent(
+            self.text[:self.cursor_index], self.text_disp.get_fontproperties(),
+            ismath=False)[0]
+        left, right = self.ax.bbox.x0 + 4, self.ax.bbox.x1 - 4
+        origin = self.text_disp.get_transform().transform(self.text_disp.get_position())[0]
+        cursor_x = origin + width
+        shift = min(0, right - cursor_x) if cursor_x > right else max(0, left - cursor_x)
+        origin += shift
+        self.text_disp.set_x((origin - self.ax.bbox.x0) / self.ax.bbox.width)
+        bounds = self.text_disp.get_window_extent(renderer)
+        bottom, top = bounds.y0, bounds.y1
+        if bottom == top:
+            height = renderer.get_text_width_height_descent(
+                'lp', self.text_disp.get_fontproperties(), ismath=False)[1]
+            bottom, top = bottom - height / 2, top + height / 2
+        self.cursor.set(segments=[[(origin + width, bottom),
+                                   (origin + width, top)]], visible=True)
+        self.ax.figure.canvas.draw_idle()
+
+
 class ColorScalePanel:
     def __init__(self, figure, state, controller, on_change, *, message_details=None):
         self.figure, self.state, self.controller = figure, state, controller
@@ -13,8 +51,8 @@ class ColorScalePanel:
         self._connections = []
         axes = {name: figure.add_axes(rect) for name, rect in COLOR_SCALE_RECTS.items()}
         self.control_axes = tuple(axes.values())
-        self.min_box = ThemedTextBox(axes['minimum'], 'Min (°C)')
-        self.max_box = ThemedTextBox(axes['maximum'], 'Max (°C)')
+        self.min_box = ScaleTextBox(axes['minimum'], 'Min (°C)')
+        self.max_box = ScaleTextBox(axes['maximum'], 'Max (°C)')
         for box in (self.min_box, self.max_box):
             label_above(box)
             self._connections.append((box, box.on_text_change(self._edit_bounds)))
@@ -139,7 +177,7 @@ class ColorScalePanel:
                 # Direct artist updates avoid TextBox.set_val's submit and draw.
                 if not capturing and box.text != value:
                     box.text_disp.set_text(value)
-                    box.cursor.set_visible(False)
+                    box.reset_viewport()
             status = snapshot.status.replace('_', ' ')
             if self._error:
                 status = self._error

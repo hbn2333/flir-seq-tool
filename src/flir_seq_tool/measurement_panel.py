@@ -100,21 +100,21 @@ class MeasurePanel:
             label_above(box)
             box.label.set_fontsize(LABEL_FONT_SIZE)
         self.page_text = figure.text(.695, .840, "", fontsize=9, va="top")
-        self.error_text = figure.text(.695, .555, "", color="crimson", fontsize=6.5, va="top")
+        self.error_text = figure.text(.695, .490, "", color="crimson", fontsize=6.5, va="top")
         self.stats_text = figure.text(.695, .561, "Add an ROI to inspect temperatures", fontsize=8.5, va="top")
         self.analysis_note = figure.text(.075, .845, "", fontsize=9, va="top", parse_math=False)
-        self.current_button = Button(axes((.08, .482, .12, .026)), "Current frame")
-        self.curves_button = Button(axes((.21, .482, .12, .026)), "Frame curves")
-        self.height_button = Button(axes((.34, .482, .145, .026)), "Height analysis")
-        self.distribution_button = Button(axes((.51, .482, .11, .026)), "Distribution")
-        self.profile_button = Button(axes((.63, .482, .095, .026)), "Profile")
-        self.horizontal_button = Button(axes((.74, .482, .10, .026)), "Horizontal")
-        self.vertical_button = Button(axes((.85, .482, .10, .026)), "Vertical")
-        self.mean_button = Button(axes((.50, .482, .08, .026)), "Mean")
-        self.min_button = Button(axes((.59, .482, .08, .026)), "Min")
-        self.max_button = Button(axes((.68, .482, .08, .026)), "Max")
-        self.calculate_button = Button(axes((.77, .482, .10, .026)), "Calculate", role="primary")
-        self.cancel_button = Button(axes((.88, .482, .07, .026)), "Cancel")
+        self.current_button = Button(axes((.08, .440, .12, .026)), "Current frame")
+        self.curves_button = Button(axes((.21, .440, .12, .026)), "Frame curves")
+        self.height_button = Button(axes((.34, .440, .145, .026)), "Height analysis")
+        self.distribution_button = Button(axes((.51, .440, .11, .026)), "Distribution")
+        self.profile_button = Button(axes((.63, .440, .095, .026)), "Profile")
+        self.horizontal_button = Button(axes((.74, .440, .10, .026)), "Horizontal")
+        self.vertical_button = Button(axes((.85, .440, .10, .026)), "Vertical")
+        self.mean_button = Button(axes((.50, .440, .08, .026)), "Mean")
+        self.min_button = Button(axes((.59, .440, .08, .026)), "Min")
+        self.max_button = Button(axes((.68, .440, .08, .026)), "Max")
+        self.calculate_button = Button(axes((.77, .440, .10, .026)), "Calculate", role="primary")
+        self.cancel_button = Button(axes((.88, .440, .07, .026)), "Cancel")
         self.save_setup_button = Button(axes((.15, .16, .17, .027)), "Save setup")
         self.export_csv_button = Button(axes((.35, .16, .17, .027)), "Export CSV")
         self.export_png_button = Button(axes((.55, .16, .17, .027)), "Export PNG")
@@ -403,7 +403,7 @@ class MeasurePanel:
             self.stats_text.set_text(
                 f"Mean {number(stats.mean_c)} °C | Min {number(stats.min_c)} °C\n"
                 f"Max {number(stats.max_c)} °C | ROI range {number(stats.delta_c)} °C\n"
-                f"Std {number(stats.std_c)} °C (ddof=0) | "
+                f"Std {number(stats.std_c)} °C (ddof=0)\n"
                 f"Valid pixels {stats.valid_pixels}/{stats.total_pixels}"
                 + (f" ({stats.total_pixels - stats.valid_pixels} excluded)" if stats.valid_pixels < stats.total_pixels else ""))
             self.analysis_note.set_text(self.selected.name[:34] + (
@@ -458,6 +458,12 @@ class MeasurePanel:
         ready = self.visible and not self.busy and not self.adding
         self.save_setup_button.set_active(ready)
         height = settings.result_view == 'height'
+        self.error_text.set_position((.695, .555 if height else .490))
+        for button in (*self.analysis_controls, *self.curve_controls):
+            rect = button.ax.get_position().bounds
+            y = .482 if height else .440
+            if abs(rect[1] - y) > 1e-9:
+                button.ax.set_position((rect[0], y, rect[2], rect[3]))
         self.stats_text.set_visible(self.visible and not height)
         self.export_csv_button.ax.set_visible(self.visible and not height)
         self.export_csv_button.set_active(ready and not height and self.can_export_kind("csv"))

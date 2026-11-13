@@ -216,8 +216,8 @@ class ViewerTheme:
             "editor_controls": (.055, .203, .91, .317),
             "editor_status": (.055, .025, .91, .17),
             "measure_image": (.05, .525, .63, .405),
-            "measure_roi": (.69, .525, .28, .405),
-            "measure_analysis": (.055, .205, .915, .31),
+            "measure_roi": (.69, .480, .28, .450),
+            "measure_analysis": (.055, .205, .915, .265),
             "measure_status": (.055, .025, .915, .172),
         }
         for name, (x, y, w, h) in rects.items():

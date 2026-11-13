@@ -11,19 +11,19 @@ NAV_RECTS = {"process": (0.08, 0.955, 0.13, 0.032), "measure": (0.22, 0.955, 0.1
 MEASURE_IMAGE_RECT = (0.075, 0.59, 0.46, 0.22)
 MEASURE_COLORBAR_RECT = (0.55, 0.59, 0.018, 0.22)
 MEASURE_CURRENT_RECT = (0.15, 0.535, 0.48, 0.025)
-MEASURE_RESULT_RECT = (0.12, 0.25, 0.76, 0.19)
-MEASURE_CURVE_TEMP_RECT = (0.12, 0.355, 0.76, 0.085)
-MEASURE_CURVE_DELTA_RECT = (0.12, 0.25, 0.76, 0.09)
+MEASURE_RESULT_RECT = (0.12, 0.25, 0.76, 0.155)
+MEASURE_CURVE_TEMP_RECT = (0.12, 0.320, 0.76, 0.085)
+MEASURE_CURVE_DELTA_RECT = (0.12, 0.25, 0.76, 0.055)
 
 # Shared controls; page integration positions the surrounding page regions.
 COLOR_SCALE_RECTS = {
-    "fixed": (.08, .895, .12, .035),
-    "per_frame": (.21, .895, .14, .035),
-    "minimum": (.40, .895, .10, .035),
-    "maximum": (.54, .895, .10, .035),
-    "apply": (.66, .895, .09, .035),
-    "auto": (.76, .895, .13, .035),
-    "cancel": (.90, .895, .08, .035),
+    "fixed": (.06, .895, .09, .035),
+    "per_frame": (.16, .895, .11, .035),
+    "minimum": (.28, .895, .17, .035),
+    "maximum": (.46, .895, .17, .035),
+    "apply": (.64, .895, .09, .035),
+    "auto": (.74, .895, .13, .035),
+    "cancel": (.88, .895, .08, .035),
 }
 
 

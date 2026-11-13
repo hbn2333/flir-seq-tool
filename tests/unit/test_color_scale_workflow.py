@@ -314,3 +314,164 @@ def test_png_callback_freezes_policy_and_effective_scale_before_dialog(
     assert snapshot.display == policy
     assert snapshot.effective_limits == effective
     assert snapshot.scale_status == status and snapshot.no_finite is no_finite
+
+@pytest.mark.parametrize('dpi', [100, 150, 200])
+def test_large_roi_statistics_and_invalid_geometry_have_separate_regions(make_measure_ui, tmp_path, dpi):
+    from dataclasses import replace
+    import numpy as np
+    from flir_seq_tool.measurement_models import Roi
+    from flir_seq_tool.models import TemperatureFrame
+    ui = make_measure_ui(color_job_factory=ControlledColorJob)
+    ui.figure.set_size_inches(10, 8)
+    ui.figure.set_dpi(dpi)
+    frame = np.full((480, 640), 22.586210250854492)
+    frame[0, 0] = np.nan
+    ui.pages.switch('measure')
+    ui.image.set_data(frame)
+    ui.image.set_extent((-.5, 639.5, 479.5, -.5))
+    ui.session.measurement.settings = replace(ui.session.measurement.settings,
+        rois=(Roi('a', 'A', 0, 0, 640, 480, '#123456', True),), active_roi_id='a')
+    panel = ui.measure_panel
+    panel.refresh_frame(TemperatureFrame(0, ui.session.reader.timestamp_at(0), frame))
+    panel._sync()
+    panel.geometry_boxes['width'].set_val('invalid')
+    ui.figure.canvas.draw()
+    renderer = ui.figure.canvas.get_renderer()
+    stats = panel.stats_text.get_window_extent(renderer)
+    error = panel.error_text.get_window_extent(renderer)
+    assert '307199/307200 (1 excluded)' in panel.stats_text.get_text()
+    assert 'ddof=0' in panel.stats_text.get_text()
+    assert stats.x1 <= ui.figure.bbox.x1
+    from matplotlib.patches import FancyBboxPatch
+    roi_card = next(a for a in ui.figure.artists
+                    if isinstance(a, FancyBboxPatch) and a.get_x() == .69)
+    card = roi_card.get_window_extent(renderer)
+    assert card.contains(stats.x0, stats.y0) and card.contains(stats.x1, stats.y1)
+    assert not stats.overlaps(error)
+    assert stats.y0 > panel.current_button.ax.bbox.y1
+    assert error.y0 > panel.current_button.ax.bbox.y1
+    ui.figure.savefig(tmp_path / f'excluded-invalid-roi-{dpi}.png')
+
+@pytest.mark.parametrize('control', ['frame', 'range'])
+def test_twenty_real_drag_events_keep_scan_owned_without_forced_draw(make_measure_ui, monkeypatch, control):
+    from matplotlib.backend_bases import MouseEvent
+    jobs = []
+    def factory(request):
+        job = ControlledColorJob(request)
+        jobs.append(job)
+        return job
+    ui = make_measure_ui(color_job_factory=factory)
+    ui.figure.canvas.draw()
+    canvas = ui.figure.canvas
+    draws = []
+    monkeypatch.setattr(canvas, 'draw_idle', lambda: None)
+    monkeypatch.setattr(canvas, 'draw', lambda: draws.append(1))
+    def forbidden(*args):
+        pytest.fail('continuous navigation must update artists without TextBox.set_val')
+    for box in (ui.current_frame_box, ui.color_scale_panel.min_box, ui.color_scale_panel.max_box):
+        monkeypatch.setattr(box, 'set_val', forbidden)
+    widget = ui.slider if control == 'frame' else ui.range_slider
+    try:
+        x, y = widget.ax.transData.transform((0, .5))
+        canvas.callbacks.process('button_press_event', MouseEvent('button_press_event', canvas, x, y, button=1))
+        for i in range(20):
+            value = (i % 4) + .1
+            x, y = widget.ax.transData.transform((value, .5))
+            canvas.callbacks.process('motion_notify_event', MouseEvent('motion_notify_event', canvas, x, y, button=1))
+            ui.poll_color_scale()
+            assert len(jobs) == 1 and jobs[0].alive
+        canvas.callbacks.process('button_release_event', MouseEvent('button_release_event', canvas, x, y, button=1))
+        assert not draws
+        assert len(ui.session.source_cache) <= 3
+        assert len(ui.session.transformed_cache) <= 3
+        if control == 'frame':
+            assert ui.session.timeline.current_local_frame == 3
+            import numpy as np
+            np.testing.assert_array_equal(ui.image.get_array(), np.arange(48).reshape(6, 8) + 30)
+        else:
+            click(ui.confirm_button)
+            assert jobs[0].cancelled and len(jobs) == 1
+            jobs[0].complete()
+            ui.poll_color_scale()
+            assert len(jobs) == 2
+    finally:
+        for job in jobs:
+            job.cancel()
+            job.join()
+        ui.poll_color_scale()
+
+@pytest.mark.parametrize('dpi', [100, 150, 200])
+@pytest.mark.parametrize('view', ['process', 'editor', 'current', 'curves', 'height'])
+def test_scale_layout_real_text_regions_in_all_views(make_measure_ui, tmp_path, dpi, view):
+    from dataclasses import replace
+    from itertools import combinations
+    from flir_seq_tool.measurement_models import Roi
+    from flir_seq_tool.measurement_job import ProgressSnapshot
+    ui = make_measure_ui(color_job_factory=ControlledColorJob)
+    ui.figure.set_size_inches(10, 8)
+    ui.figure.set_dpi(dpi)
+    ui.session.color_scale.apply_manual(22.586210250854492, 50.18052673339844)
+    panel = ui.color_scale_panel
+    ui.session.measurement.settings = replace(ui.session.measurement.settings,
+        rois=(Roi('r', 'Sample', 0, 0, 2, 2, '#123456', True),), active_roi_id='r')
+    if view == 'curves':
+        from flir_seq_tool.measurement_store import ResultStore
+        store = ResultStore.create(tmp_path)
+        store.append_rows(
+            dict(roi_id='r', local_frame=i, source_frame=i, timestamp='2026-10-22T00:00:00',
+                 relative_s=i * .02, mean_c=4. + i, min_c=1. + i, max_c=7. + i,
+                 delta_c=6., std_c=2., valid_pixels=4, total_pixels=4)
+            for i in range(5))
+        key = ui.session.analysis_key()
+        store.complete(expected_rows=5, key_json=key.to_json())
+        ui.session.measurement.result_store = store
+        ui.session.measurement.result_key = key
+        ui.session.measurement.status = 'complete'
+    if view == 'editor':
+        click(ui.edit_transform_button)
+    elif view != 'process':
+        ui.pages.switch('measure')
+        ui.measure_panel._set_view('result_view', view)
+    # Exercise all status forms with pending text, preserving prefix and details.
+    for status in ('scanning', 'cancelling', 'error'):
+        ui.color_controller._status = status
+        ui.color_controller._error = 'source failure ' * 100 if status == 'error' else None
+        ui.color_controller._progress = ProgressSnapshot(1, 5, 'wide source path ' * 100)
+        panel._error = 'source failure ' * 100 if status == 'error' else None
+        ui.session.color_scale.edit_bounds('22.586210250854492', '50.18052673339844')
+        panel.sync()
+        ui.figure.canvas.draw()
+        renderer = ui.figure.canvas.get_renderer()
+        text = panel.status_text
+        assert text.get_text().startswith('unapplied bounds')
+        assert 'F1' in text.get_text()
+        bounds = text.get_window_extent(renderer)
+        assert bounds.x1 <= ui.figure.bbox.x1
+        header = [w.ax for w in panel.widgets]
+        for a, b in combinations(header, 2):
+            assert not a.bbox.overlaps(b.bbox)
+        targets = [ui.axes, ui.current_frame_box.ax, *header]
+        targets += [a for a in ui.measure_panel.control_axes if a.get_visible()]
+        for ax in targets:
+            if ax.get_visible():
+                assert not bounds.overlaps(ax.bbox)
+        assert bounds.y1 < min(ax.bbox.y0 for ax in header)
+        assert bounds.y0 > ui.axes.title.get_window_extent(renderer).y1
+        for box in (panel.min_box, panel.max_box):
+            glyphs = box.text_disp.get_window_extent(renderer)
+            assert box.ax.bbox.contains(glyphs.x0, glyphs.y0)
+            assert box.ax.bbox.contains(glyphs.x1, glyphs.y1)
+        if view == 'editor':
+            assert not any(w.active for w in panel.widgets)
+    if view == 'height':
+        ui.measure_panel.geometry_boxes['width'].set_val('invalid')
+        ui.figure.canvas.draw()
+        error = ui.measure_panel.error_text.get_window_extent(renderer)
+        for ax in ui.measure_panel.control_axes:
+            if ax.get_visible():
+                assert not error.overlaps(ax.bbox)
+    if view == 'curves':
+        temp, delta = ui.measure_panel.result_axes, ui.measure_panel.delta_axes
+        assert temp.lines and delta.lines
+        assert delta.get_tightbbox(renderer).y1 < temp.bbox.y0
+    ui.figure.savefig(tmp_path / f'{view}-{dpi}.png')
