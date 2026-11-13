@@ -41,6 +41,16 @@ class ColorScaleState:
     def settings(self) -> DisplaySettings:
         return self._settings
 
+    def load_settings(self, display: DisplaySettings) -> None:
+        """Replace loaded policy and reset runtime state, preserving this owner."""
+        if not isinstance(display, DisplaySettings):
+            raise ValueError('display must be DisplaySettings')
+        self.__init__(display)
+
+    def set_colormap(self, name: str) -> None:
+        """Change only the palette, retaining bootstrap, drafts, and cached limits."""
+        self._replace_settings(colormap=name)
+
     @property
     def draft_bounds(self) -> tuple[str, str] | None:
         return self._draft_bounds

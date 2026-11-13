@@ -214,7 +214,7 @@ def test_external_source_change_invalidates_cached_auto(rig, loaded):
 def test_final_filesystem_check_before_publication(rig):
     controller, state, jobs, _ = start(rig)
     jobs[0].finish()
-    controller.context.source_path.write_bytes(b'changed')
+    controller.context.source_path.write_bytes(b'changed-source-size')
     controller.poll()
     assert not state.fixed_ready and controller.status == 'failed'
 

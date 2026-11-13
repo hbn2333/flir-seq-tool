@@ -548,7 +548,7 @@ def test_transform_real_drag_preserves_integer_pixel_boundaries(reverse):
         plt.close(ui.figure)
 
 
-def test_viewer_session_caches_frames_and_fixes_first_frame_color_limits():
+def test_viewer_session_caches_frames_and_bootstraps_finite_color_limits():
     reader = FakeTemperatureReader(make_frames())
     session = ViewerSession(reader, cache_size=3)
 
@@ -560,8 +560,8 @@ def test_viewer_session_caches_frames_and_fixes_first_frame_color_limits():
     assert second.frame_index == 1
     assert reader.requested_frames == [0, 1]
     assert session.color_limits == ColorLimits(
-        vmin=pytest.approx(1.05),
-        vmax=pytest.approx(5.95),
+        vmin=pytest.approx(1.0),
+        vmax=pytest.approx(6.0),
     )
     assert len(session.cache) == 2
 
@@ -1304,17 +1304,20 @@ def test_startup_pending_blocks_auto_and_manual_loading(tmp_path, monkeypatch, c
     assert session.state_signature() == before
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5])
 def test_startup_launch_restores_before_first_draw_and_does_not_reload(tmp_path, monkeypatch, version):
     from contextlib import nullcontext
     reader, config, document = saved_startup_view(tmp_path)
-    if version < 4:
+    if version < 5:
         payload = document.to_dict()
         payload["schema_version"] = version
-        payload.pop("provenance", None)
+        for key in ("scale_mode", "fixed_source", "auto_scope"):
+            payload["display"].pop(key)
+        if version < 4:
+            payload.pop("provenance", None)
         if version < 3:
             del payload["measurement"]
-        else:
+        elif version < 4:
             for key in ("height_settings", "height_view", "height_unit"):
                 payload["measurement"].pop(key)
         if version == 1:

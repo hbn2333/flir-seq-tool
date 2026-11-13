@@ -15,7 +15,11 @@ from matplotlib.text import Text
 from .viewer_theme import (ThemedButton as Button, ThemedRangeSlider as RangeSlider,
     ThemedSlider as Slider, ThemedTextBox as TextBox, ViewerTheme, style_plot, MUTED, NAV_FONT_SIZE)
 
-from .color_scale import ColorLimits, compute_color_limits
+from .color_scale import ColorLimits
+from .color_scale_state import ColorScaleState
+from .color_scale_controller import ColorScaleController
+from .color_scale_job import ColorScaleContext
+from .color_scale_models import ColorScaleScope
 from .frame_cache import FrameCache
 from .frame_transformer import FrameTransformer
 from .extraction import (
@@ -90,9 +94,12 @@ class ViewerSession:
             raise ValueError("SEQ contains no frames")
 
         self.reader = reader
+        self.color_scale = ColorScaleState()
+        self._color_initialized = False
+        self._color_controller = None
+        self._color_context = None
+        self._cached_source_identity = None
         self.colormap = colormap
-        if colormap not in plt.colormaps():
-            raise ValueError(f"unknown colormap: {colormap}")
         self.selection_store = selection_store or SelectionStore(
             WORKSPACE_ROOT / "selections"
         )
@@ -118,8 +125,85 @@ class ViewerSession:
         self._work_time_key: tuple[int, int] | None = None
         self._work_time_value: tuple[datetime, datetime] | None = None
         self.color_limits = explicit_limits
+        self.refresh_color_context()
         if self.color_limits is not None:
             self._establish_saved_signatures()
+
+    @property
+    def colormap(self) -> str:
+        return self.color_scale.settings.colormap
+
+    @colormap.setter
+    def colormap(self, name: str) -> None:
+        if name not in plt.colormaps():
+            raise ValueError(f"unknown colormap: {name}")
+        self.color_scale.set_colormap(name)
+
+    @property
+    def color_limits(self) -> ColorLimits | None:
+        return self.color_scale.render_snapshot().limits if self._color_initialized else None
+
+    @color_limits.setter
+    def color_limits(self, limits: ColorLimits | None) -> None:
+        if limits is None:
+            return  # Bootstrap callers do not turn the default automatic policy manual.
+        if not isinstance(limits, ColorLimits):
+            raise ValueError('color limits must be ColorLimits or None')
+        self.color_scale.apply_manual(limits.vmin, limits.vmax)
+        self._color_initialized = True
+
+    def refresh_color_context(self) -> None:
+        """Refresh frozen source inputs only at committed configuration boundaries."""
+        self._commit_color_context(self._prepare_color_context())
+
+    def _prepare_color_context(self, *, source_range=None, transform=None, identity=None):
+        if not hasattr(self.reader, 'path'):
+            return None
+        identity = identity or self._cached_source_identity or self.source_identity()
+        if self._cached_source_identity is not None:
+            validate_source_identity(self._cached_source_identity, identity)
+        path = Path(self.reader.path)
+        stat = path.stat()
+        if (path.name, stat.st_size, stat.st_mtime_ns) != (
+                identity.filename, identity.size_bytes, identity.modified_time_ns):
+            raise ValueError('source changed; reopen the source before continuing')
+        return ColorScaleContext(path, identity,
+                                 *(source_range or self.measure_source_range()),
+                                 transform or self.applied_transform)
+
+    def _commit_color_context(self, context) -> None:
+        if context is None:
+            return
+        self._cached_source_identity = context.source_identity
+        self._color_context = context
+        self.color_scale.set_scope(context.scope)
+        if self._color_controller is not None:
+            self._color_controller.set_context(context)
+
+    def get_color_controller(self, *, job_factory=None) -> ColorScaleController:
+        """Return the lazy session owner; activation belongs to the committed UI."""
+        if self._color_controller is None:
+            self._color_controller = (ColorScaleController(self.color_scale) if job_factory is None
+                                      else ColorScaleController(self.color_scale, job_factory))
+            if self._color_context is not None:
+                self._color_controller.set_context(self._color_context)
+        return self._color_controller
+
+    @property
+    def color_controller(self) -> ColorScaleController:
+        return self.get_color_controller()
+
+    def close_color_scale(self, *, wait: bool = False) -> None:
+        if self._color_controller is not None:
+            self._color_controller.close(wait=wait)
+
+    def _display_for_selection(self, scope: str, identity=None) -> DisplaySettings:
+        identity = identity or self._cached_source_identity
+        if identity is None:
+            return replace(self.color_scale.settings, auto_scope=None)
+        scale_scope = ColorScaleScope.from_inputs(identity, *self.selection_source_range(scope),
+                                                  self.applied_transform)
+        return self.color_scale.settings_for_selection(scale_scope)
 
     def _check_pending(self) -> None:
         marker = pending_path(Path(self.reader.path))
@@ -167,8 +251,8 @@ class ViewerSession:
             key,
             lambda cache_key: self._transform_frame(cache_key[0]),
         )
-        if self.color_limits is None:
-            self.color_limits = compute_color_limits(frame.temperature_c)
+        self.color_scale.observe_frame(frame.temperature_c)
+        self._color_initialized = True
         if self.process_saved_signature is None:
             self._establish_saved_signatures()
         return frame
@@ -219,6 +303,7 @@ class ViewerSession:
         if transform == self.applied_transform:
             return
         transformer = FrameTransformer(transform)
+        color_context = self._prepare_color_context(transform=transform)
         self.applied_transform = transform
         self.frame_transformer = transformer
         self.transformed_cache.clear()
@@ -226,6 +311,7 @@ class ViewerSession:
         self._preview_transformer = None
         self.release_measurement_store(self.measurement.clear())
         self.selection_dirty = True
+        self._commit_color_context(color_context)
 
     def release_measurement_store(self, store: Any | None) -> None:
         """Retain cleanup ownership on failure without undoing a committed state change."""
@@ -294,16 +380,23 @@ class ViewerSession:
         raise ValueError("unknown selection scope")
 
     def confirm_range(self) -> bool:
+        if self.timeline.pending_range == (0, self.timeline.local_num_frames - 1):
+            return False
+        color_context = self._prepare_color_context(source_range=self.selection_source_range('process'))
         changed = self.timeline.confirm_range()
         if changed:
             self.measurement.invalidate()
+            self._commit_color_context(color_context)
         return changed
 
     def reset_full(self) -> None:
         before = self.measure_source_range()
+        color_context = (self._prepare_color_context(source_range=(0, self.reader.num_frames - 1))
+                         if before != (0, self.reader.num_frames - 1) else None)
         self.timeline.reset_full()
         if self.measure_source_range() != before:
             self.measurement.invalidate()
+            self._commit_color_context(color_context)
 
     def analysis_key(self) -> AnalysisKey:
         return AnalysisKey.from_inputs(self.source_identity(), *self.measure_source_range(),
@@ -313,17 +406,14 @@ class ViewerSession:
         if self.color_limits is None:
             raise RuntimeError("viewer color limits were not initialized")
         source_start, source_end = self.selection_source_range(scope)
+        identity = self.source_identity()
         return build_selection_document(
-            source=self.source_identity(),
+            source=identity,
             source_start_frame=source_start,
             source_end_frame=source_end,
             start_timestamp=self.reader.timestamp_at(source_start),
             end_timestamp=self.reader.timestamp_at(source_end),
-            display=DisplaySettings(
-                colormap=self.colormap,
-                vmin_c=self.color_limits.vmin,
-                vmax_c=self.color_limits.vmax,
-            ),
+            display=self._display_for_selection(scope, identity),
             transform=self.applied_transform,
             measurement=self.measurement.settings,
             provenance=self.provenance,
@@ -363,28 +453,28 @@ class ViewerSession:
 
     def _prepare_selection(self, document: SelectionDocument):
         self._check_pending()
-        validate_source_identity(self.source_identity(), document.source)
+        identity = self.source_identity()
+        validate_source_identity(identity, document.source)
         if document.display.colormap not in plt.colormaps():
             raise ValueError(f"unknown colormap: {document.display.colormap}")
         self._validate_transform(document.transform)
         document.measurement.validate_bounds(document.transform.crop.width, document.transform.crop.height)
         new_transformer = FrameTransformer(document.transform)
-        new_color_limits = ColorLimits(
-            vmin=document.display.vmin_c,
-            vmax=document.display.vmax_c,
-        )
         timeline = TimelineState(self.reader.num_frames)
         timeline.restore_source_range(
             document.selection.source_start_frame,
             document.selection.source_end_frame,
         )
-        return timeline, new_transformer, new_color_limits
+        color_context = self._prepare_color_context(
+            source_range=(timeline.source_start, timeline.source_end),
+            transform=document.transform, identity=identity)
+        return timeline, new_transformer, color_context
 
     def apply_selection_document(self, document: SelectionDocument, *, path: Path) -> None:
-        timeline, new_transformer, new_color_limits = self._prepare_selection(document)
+        timeline, new_transformer, color_context = self._prepare_selection(document)
         self.timeline = timeline
-        self.colormap = document.display.colormap
-        self.color_limits = new_color_limits
+        self.color_scale.load_settings(document.display)
+        self._color_initialized = True
         self.applied_transform = document.transform
         self.frame_transformer = new_transformer
         self.transformed_cache.clear()
@@ -396,6 +486,7 @@ class ViewerSession:
         self.measurement.settings = document.measurement
         self.provenance = document.provenance
         self.selection_dirty = False
+        self._commit_color_context(color_context)
         self._establish_saved_signatures()
         self.selection_path = Path(path)
         self.release_measurement_store(previous)
@@ -405,13 +496,9 @@ class ViewerSession:
         self.measure_saved_signature = self.state_signature(scope="measure")
 
     def state_signature(self, *, scope: str = "process") -> str:
-        limits = self.color_limits
         payload = {
             "source_range": self.selection_source_range(scope),
-            "color_limits": None
-            if limits is None
-            else [limits.vmin, limits.vmax],
-            "colormap": self.colormap,
+            "display": self._display_for_selection(scope).to_dict(),
             "transform": self.applied_transform.fingerprint,
             "measurement": self.measurement.settings.to_dict(),
             "provenance": [link.to_dict() for link in self.provenance],

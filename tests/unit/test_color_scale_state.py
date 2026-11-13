@@ -315,3 +315,53 @@ def test_discard_draft_preserves_policy_snapshot_and_cached_auto(source):
     state.restore_auto()
     assert state.fixed_ready
     assert state.render_snapshot().limits == ColorLimits(20, 50)
+
+
+def test_palette_preserves_bootstrap_and_draft():
+    state = ColorScaleState()
+    state.edit_bounds('draft', 'text')
+    state.set_colormap('magma')
+    state.observe_frame(np.array([10, 20]))
+    assert state.settings == DisplaySettings('magma', 10, 20, fixed_source='auto')
+    assert state.draft_bounds == ('draft', 'text')
+
+
+def test_palette_preserves_auto_cache_and_policy():
+    state = auto_state()
+    state.accept_auto(SCOPE, ColorLimits(10, 60))
+    state.apply_manual(20, 30)
+    state.select_mode('per_frame')
+    state.edit_bounds('draft', 'retained')
+    before = state.settings
+    state.set_colormap('magma')
+    assert state.settings == replace(before, colormap='magma')
+    assert state.draft_bounds == ('draft', 'retained')
+    state.restore_auto()
+    assert state.fixed_ready
+    assert state.render_snapshot().limits == ColorLimits(10, 60)
+
+
+def test_load_settings_resets_runtime_state_without_replacing_state():
+    state = auto_state()
+    state.accept_auto(SCOPE, ColorLimits(10, 60))
+    state.observe_frame(np.array([10, 20]))
+    state.freeze_preview()
+    state.edit_bounds('draft', 'text')
+    display = DisplaySettings('magma', 1, 3)
+    state.load_settings(display)
+    assert state.settings == display
+    assert not state.draft_pending
+    assert state.render_snapshot().limits == ColorLimits(1, 3)
+    state.set_scope(SCOPE)
+    state.restore_auto()
+    assert not state.fixed_ready  # Loading discarded the previous policy's cache.
+
+
+def test_invalid_load_settings_preserves_runtime_state():
+    state = auto_state()
+    state.edit_bounds('draft', 'text')
+    before = state.settings
+    with pytest.raises(ValueError, match='DisplaySettings'):
+        state.load_settings(None)
+    assert state.settings == before
+    assert state.draft_bounds == ('draft', 'text')
