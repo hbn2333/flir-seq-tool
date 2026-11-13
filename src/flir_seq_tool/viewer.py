@@ -18,7 +18,8 @@ from .viewer_theme import (ThemedButton as Button, ThemedRangeSlider as RangeSli
 from .color_scale import ColorLimits
 from .color_scale_state import ColorScaleState
 from .color_scale_controller import ColorScaleController
-from .color_scale_job import ColorScaleContext
+from .color_scale_job import ColorScaleContext, ColorScaleJob
+from .color_scale_panel import ColorScalePanel
 from .color_scale_models import ColorScaleScope
 from .frame_cache import FrameCache
 from .frame_transformer import FrameTransformer
@@ -607,6 +608,9 @@ class ViewerUI:
     dispose: Callable[..., None]
     height_export_state: ViewerHeightExportState
     poll_height_export: Callable[[], None]
+    color_scale_panel: ColorScalePanel
+    color_controller: ColorScaleController
+    poll_color_scale: Callable[[], None]
 
     @property
     def analysis_job(self):
@@ -651,6 +655,8 @@ def build_viewer(
     on_window_close: Callable | None = None,
     height_job_factory: Callable = HeightAnalysisJob,
     height_export_job_factory: Callable = HeightExportJob,
+    color_job_factory: Callable | None = None,
+    defer_color_scan: bool = False,
 ) -> ViewerUI:
     """Build into an optional owned Figure, reclaiming partial input registrations."""
     from .viewer_window import UIResources
@@ -663,7 +669,8 @@ def build_viewer(
                              on_open_seq=on_open_seq, can_open_seq=can_open_seq,
                              on_window_close=on_window_close, resources=resources,
                              height_job_factory=height_job_factory,
-                             height_export_job_factory=height_export_job_factory)
+                             height_export_job_factory=height_export_job_factory,
+                             color_job_factory=color_job_factory, defer_color_scan=defer_color_scan)
     except BaseException:
         resources.dispose()
         if owned_figure:
@@ -674,9 +681,11 @@ def build_viewer(
 def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialogs,
                   analysis_job_factory, video_job_factory, *, figure,
                   on_open_seq, can_open_seq, on_window_close, resources,
-                  height_job_factory, height_export_job_factory) -> ViewerUI:
+                  height_job_factory, height_export_job_factory, color_job_factory, defer_color_scan) -> ViewerUI:
     frame = session.frame_at_local(initial_frame)
     current_frame = frame
+    preview_colormap_active = False
+    color_controller = session.get_color_controller(job_factory=color_job_factory or ColorScaleJob)
     limits = session.color_limits
     if limits is None:
         raise RuntimeError("viewer color limits were not initialized")
@@ -687,7 +696,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
     figure.canvas.manager.set_window_title(f"FLIR SEQ Tool | {Path(getattr(session.reader, 'path', 'SEQ')).name}")
     if dialogs is None:
         dialogs = SelectionDialogs(getattr(figure.canvas.manager, "window", None))
-    figure.subplots_adjust(bottom=0.56, right=0.87, top=0.90)
+    figure.subplots_adjust(bottom=0.56, right=0.87, top=0.81)
     image = axes.imshow(
         frame.temperature_c,
         cmap=session.colormap,
@@ -880,7 +889,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         sync_slider: bool = True,
         preview_transform: FrameTransform | None = None,
     ) -> None:
-        nonlocal updating, current_frame
+        nonlocal updating, current_frame, preview_colormap_active
         if mode_state.editing_transform:
             session.timeline.set_current(local_frame)
             source_frame = session.timeline.source_frame_at(local_frame)
@@ -893,13 +902,19 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
             preview_cmap = plt.get_cmap(session.colormap).copy()
             preview_cmap.set_bad("0.35")
             image.set_cmap(preview_cmap)
+            preview_colormap_active = True
             set_image_array(values)
+            session.color_scale.observe_frame(next_frame.temperature_c)
             transform_editor._sync_controls()
         else:
             next_frame = session.frame_at_local(local_frame)
-            image.set_cmap(session.colormap)
+            if preview_colormap_active or image.get_cmap().name != session.colormap:
+                image.set_cmap(session.colormap)
+            preview_colormap_active = False
             set_image_array(next_frame.temperature_c)
         current_frame = next_frame
+        apply_color_limits()
+        color_scale_panel.sync()
         if pages.current == "measure":
             measure_panel.current_local_frame = local_frame
             measure_panel.frame_count = session.timeline.local_num_frames
@@ -1035,7 +1050,12 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
             return
         if not process_input_available():
             return
-        if session.confirm_range():
+        try:
+            changed = session.confirm_range()
+        except (OSError, ValueError, RuntimeError) as exc:
+            set_error(f"Confirm range failed: {exc}")
+            return
+        if changed:
             invalidate_export_confirmation()
             mark_selection_dirty()
             sync_all_controls()
@@ -1048,7 +1068,11 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         if not process_input_available():
             return
         before = session.state_signature()
-        session.reset_full()
+        try:
+            session.reset_full()
+        except (OSError, ValueError, RuntimeError) as exc:
+            set_error(f"Reset range failed: {exc}")
+            return
         invalidate_export_confirmation()
         if session.state_signature() != before:
             mark_selection_dirty()
@@ -1095,33 +1119,36 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         if not process_input_available():
             return
         target = None
+        color_controller.suspend("load")
         try:
             target = dialogs.choose_load(session.selection_store.root)
             if target is None:
                 return
             document = session.selection_store.load_path(target, session.source_identity())
             session._prepare_selection(document)
-            if session.has_unsaved_changes() and not dialogs.confirm(
+            if (session.has_unsaved_changes() or session.color_scale.draft_pending) and not dialogs.confirm(
                 "Replace unsaved range, color scale, colormap, and transform? (Includes ROI setup.)\n"
                 f"Load: {target}"
             ):
                 return
             session.apply_selection_document(document, path=target)
             measure_panel.clear_current_analysis()
+            image.set_cmap(session.colormap)
+            if session.color_limits is None:
+                raise RuntimeError("loaded selection has no color limits")
+            image.set_clim(session.color_limits.vmin, session.color_limits.vmax)
+            invalidate_export_confirmation()
+            if mode_state.editing_transform:
+                leave_transform_mode(refresh=False)
+            sync_all_controls()
+            show_local(0)
+            refresh_transform_status()
+            set_error(f"Loaded selection: {target}", error=False)
         except (OSError, ValueError, RuntimeError) as exc:
             set_error(f"Load selection failed: {exc}" + (f"\nFile: {target}" if target is not None else ""))
             return
-        image.set_cmap(session.colormap)
-        if session.color_limits is None:
-            raise RuntimeError("loaded selection has no color limits")
-        image.set_clim(session.color_limits.vmin, session.color_limits.vmax)
-        invalidate_export_confirmation()
-        if mode_state.editing_transform:
-            leave_transform_mode(refresh=False)
-        sync_all_controls()
-        show_local(0)
-        refresh_transform_status()
-        set_error(f"Loaded selection: {target}", error=False)
+        finally:
+            color_controller.resume("load")
 
     def invalidate_export_confirmation() -> None:
         if export_state.confirmation is None:
@@ -1153,11 +1180,14 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
 
     def leave_transform_mode(*, refresh: bool = True) -> None:
         mode_state.editing_transform = False
+        session.color_scale.resume_preview()
+        color_scale_panel.set_editing(False)
         transform_editor.set_visible(False)
         set_normal_controls_visible(True)
         sync_all_controls()
         if refresh:
             show_local(session.timeline.current_local_frame)
+        color_controller.resume("transform")
 
     def on_preview_transform(transform: FrameTransform) -> None:
         if not mode_state.editing_transform:
@@ -1167,7 +1197,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
                 session.timeline.current_local_frame,
                 preview_transform=transform,
             )
-        except (IndexError, ValueError, RuntimeError) as exc:
+        except (IndexError, OSError, ValueError, RuntimeError) as exc:
             set_error(f"Transform preview failed: {exc}")
 
     def on_apply_transform(_transform: FrameTransform) -> None:
@@ -1183,7 +1213,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
             session.preview_frame(source_frame, transform)
             session.apply_transform(transform)
             invalidate_export_confirmation()
-        except (IndexError, ValueError, RuntimeError) as exc:
+        except (IndexError, OSError, ValueError, RuntimeError) as exc:
             set_error(f"Apply transform failed: {exc}")
             return
         leave_transform_mode()
@@ -1202,6 +1232,9 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         if job is not None and job.is_alive():
             set_error("Cannot edit transform while export is running")
             return
+        session.color_scale.freeze_preview()
+        color_controller.suspend("transform")
+        color_scale_panel.set_editing(True)
         transform_editor.draft = TransformDraft.from_applied(
             session.applied_transform
         )
@@ -1224,6 +1257,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         edit_transform_button.set_active(active)
         export_button.set_active(active)
         cancel_button.set_active(not active)
+        color_controller.set_heavy_busy(not active)
         pages.set_busy(None if active else "native_export")
 
     def current_confirmation(target: Path) -> ExportConfirmation:
@@ -1238,6 +1272,8 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         )
 
     def on_export(_event: Any) -> None:
+        if color_controller.blocks_heavy_tasks:
+            return
         if mode_state.editing_transform:
             set_error("Cannot export while editing transform")
             return
@@ -1364,7 +1400,8 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
 
     def on_calculate():
         if (pages.current != "measure" or pages.busy is not None or mode_state.editing_transform
-                or measure_panel.adding or not session.measurement.settings.rois or analysis_state.closed):
+                or measure_panel.adding or not session.measurement.settings.rois or analysis_state.closed
+                or color_controller.blocks_heavy_tasks):
             return
         try:
             source = session.source_identity()
@@ -1381,6 +1418,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         analysis_state.request, analysis_state.job = request, job
         session.measurement.status = "running"
         measure_panel.set_busy(True)
+        color_controller.set_heavy_busy(True)
         pages.set_busy("analysis")
         progress_text.set_visible(True)
         try:
@@ -1388,6 +1426,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         except Exception as exc:
             analysis_state.job = None
             restore_analysis_status(key, fallback="failed")
+            color_controller.set_heavy_busy(False)
             pages.set_busy(None)
             sync_all_controls()
             set_error(f"Analysis start failed: {exc}")
@@ -1458,6 +1497,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
             session.release_measurement_store(outcome.cleanup_store)
         analysis_state.job = None
         analysis_state.request = None
+        color_controller.set_heavy_busy(False)
         pages.set_busy(None)
         sync_all_controls()
         if session.measurement_cleanup_error:
@@ -1538,15 +1578,18 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
     resources.add_cleanup(measure_panel.dispose)
     measure_panel.set_visible(False)
     measure_panel.set_result_axes(measure_placeholder, measure_delta_axes)
+    measure_panel.can_calculate = lambda: not color_controller.blocks_heavy_tasks
     measure_panel.on_calculate = on_calculate
     measure_panel.on_cancel = on_cancel_analysis
     measure_panel.on_save_setup = lambda: on_save(scope="measure")
 
-    def can_export_analysis():
+    def can_export_analysis(kind="csv"):
         # Availability never touches the SDK reader: analysis owns it while busy.
         if pages.busy is not None or measure_panel.adding:
             return False
         state = session.measurement
+        if kind == "csv" and state.settings.result_view != "current" and color_controller.blocks_heavy_tasks:
+            return False
         if state.settings.result_view == "current":
             return measure_panel.current_analysis is not None
         key = state.result_key
@@ -1557,9 +1600,10 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
                                                       for roi in state.settings.rois)))
 
     def on_analysis_export(kind):
-        if pages.current != "measure" or not can_export_analysis():
+        if pages.current != "measure" or not can_export_analysis(kind):
             return
         target = None
+        heavy_export = False
         try:
             identity = session.source_identity()
             state = session.measurement
@@ -1582,20 +1626,26 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
             if expected.exists and not dialogs.confirm(f"Overwrite {kind.upper()}?\n{target}"):
                 return
             writer = export_csv if kind == "csv" else export_png
+            heavy_export = kind == "csv" and state.settings.result_view != "current"
+            if heavy_export:
+                color_controller.set_heavy_busy(True)
             writer(target, snapshot, expected=expected, raw_root=session.selection_store.raw_root)
             set_error(f"Exported {kind.upper()}: {target}", error=False)
         except (OSError, ValueError, RuntimeError) as exc:
             set_error(f"Analysis export failed: {exc}" + (f"\nFile: {target}" if target is not None else ""))
         finally:
+            if heavy_export:
+                color_controller.set_heavy_busy(False)
             if pages.busy == "analysis_export":
                 pages.set_busy(None)
                 sync_all_controls()
 
     measure_panel.can_export = can_export_analysis
+    measure_panel.can_export_kind = can_export_analysis
     measure_panel.on_export = on_analysis_export
 
     def can_export_height(kind):
-        if (kind not in ("height", "zones") or pages.busy is not None or measure_panel.adding
+        if (color_controller.blocks_heavy_tasks or kind not in ("height", "zones") or pages.busy is not None or measure_panel.adding
                 or session.measurement.settings.result_view != "height"):
             return False
         state = session.measurement
@@ -1628,6 +1678,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
             job = height_export_job_factory(target, snapshot, kind=kind, expected=expected,
                                             raw_root=session.selection_store.raw_root)
             height_export_state.job = job
+            color_controller.set_heavy_busy(True)
             job.start()
             started = True
             height_export_state.timer.start()
@@ -1637,6 +1688,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
             set_error(f"Height export failed: {exc}" + (f"\nFile: {target}" if target is not None else ""))
         finally:
             if not started:
+                color_controller.set_heavy_busy(False)
                 pages.set_busy(None)
                 sync_all_controls()
 
@@ -1653,6 +1705,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         height_export_state.timer.stop()
         outcome = job.outcome
         height_export_state.job = None
+        color_controller.set_heavy_busy(False)
         pages.set_busy(None)
         sync_all_controls()
         if outcome is not None and outcome.status == "complete":
@@ -1671,11 +1724,57 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
     def process_availability(widget) -> bool:
         if mode_state.editing_transform:
             return False
+        if widget in (export_button, video_button) and color_controller.blocks_heavy_tasks:
+            return False
         if widget is range_slider:
             return session.timeline.local_num_frames > 1
         if widget is cancel_button:
             return export_state.confirmation is not None
         return True
+
+    def apply_color_limits():
+        limits = session.color_scale.render_snapshot().limits
+        if image.get_clim() != (limits.vmin, limits.vmax):
+            image.set_clim(limits.vmin, limits.vmax)
+
+    last_display = session.color_scale.settings
+    color_timer_running = False
+
+    def color_changed():
+        nonlocal last_display, color_timer_running
+        settings = session.color_scale.settings
+        if settings != last_display:
+            last_display = settings
+            invalidate_export_confirmation()
+        apply_color_limits()
+        color_scale_panel.sync()
+        refresh_transform_status()
+        pages.refresh()
+        if color_controller.blocks_heavy_tasks:
+            if not color_timer_running:
+                color_timer_running = True
+                color_timer.start()
+        else:
+            color_timer_running = False
+            color_timer.stop()
+
+    color_scale_panel = ColorScalePanel(figure, session.color_scale, color_controller,
+                                       color_changed, message_details=message_details)
+    resources.add_widgets(*color_scale_panel.widgets)
+    resources.add_cleanup(color_scale_panel.dispose)
+    resources.add_cleanup(color_controller.detach)
+    color_timer = figure.canvas.new_timer(interval=100)
+    resources.add_timer(color_timer)
+
+    def poll_color_scale():
+        nonlocal color_timer_running
+        if color_controller.blocks_heavy_tasks:
+            color_controller.poll()
+        else:
+            color_timer_running = False
+            color_timer.stop()
+
+    color_timer.add_callback(poll_color_scale)
 
     pages = PageCoordinator(figure.canvas, {
         "process": PageGroup(normal_control_axes, process_widgets, texts=(export_text,),
@@ -1693,6 +1792,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
     def refresh_page(page: str) -> None:
         measure = page == "measure"
         theme.show_page(page, editing=mode_state.editing_transform)
+        color_scale_panel.set_busy(pages.busy is not None)
         measure_panel.set_busy(pages.busy is not None)
         measure_panel.cancel_button.set_active((pages.busy == "analysis" and analysis_state.job is not None
                                               and analysis_state.job.is_alive()) or
@@ -1733,6 +1833,8 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
     measure_panel.on_interaction_change = pages.refresh
 
     def video_busy(busy):
+        if not busy:
+            color_controller.set_heavy_busy(False)
         pages.set_busy("video_export" if busy else None)
         if busy:
             progress_text.set_text("")
@@ -1758,11 +1860,14 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
     video_timer.add_callback(poll_video)
 
     def on_video(_event):
+        if color_controller.blocks_heavy_tasks:
+            return
         if mode_state.editing_transform or not process_input_available():
             return
         invalidate_export_confirmation()
         video_controller.start()
         if video_controller.job is not None:
+            color_controller.set_heavy_busy(True)
             video_timer.start()
             pages.refresh()
 
@@ -1805,6 +1910,8 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
     show_local(initial_frame)
 
     def dispose(*, wait=False, preserve_session=False):
+        if not preserve_session:
+            session.close_color_scale(wait=wait)
         height_job = height_export_state.job
         if not preserve_session:
             if height_job is not None and height_job.is_alive():
@@ -1823,7 +1930,14 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         if resources.errors:
             message_details["cleanup"] = "\n".join(resources.errors)
 
+    color_controller.attach(color_changed)
     resources.seal()
+    if not defer_color_scan:
+        try:
+            color_controller.activate()
+        except BaseException:
+            session.close_color_scale(wait=False)
+            raise
 
     return ViewerUI(
         figure=figure,
@@ -1868,6 +1982,9 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         dispose=dispose,
         height_export_state=height_export_state,
         poll_height_export=poll_height_export,
+        color_scale_panel=color_scale_panel,
+        color_controller=color_controller,
+        poll_color_scale=poll_color_scale,
     )
 
 

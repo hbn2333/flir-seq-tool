@@ -72,6 +72,18 @@ def make_measure_ui(tmp_path):
         return ui
     yield make
     for ui in viewers:
-        ui.shutdown_analysis(wait=True)
+        ui.dispose(wait=True)
     for figure in figures:
         plt.close(figure)
+
+
+@pytest.fixture(autouse=True)
+def no_native_color_worker(monkeypatch):
+    """Synthetic unit sources cannot be opened through FileSDK."""
+    class UnavailableJob:
+        started = False
+        def __init__(self, request):
+            self.request = request
+        def start(self):
+            raise RuntimeError("Synthetic test source: inject a controlled color job")
+    monkeypatch.setattr("flir_seq_tool.viewer.ColorScaleJob", UnavailableJob)

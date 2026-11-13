@@ -670,7 +670,7 @@ def test_viewer_session_uses_real_endpoint_timestamps_for_duration():
 
 def test_build_viewer_slider_updates_frame_without_changing_color_limits():
     reader = FakeTemperatureReader(make_frames())
-    session = ViewerSession(reader)
+    session = ViewerSession(reader, vmin=1.05, vmax=5.95)
     ui = build_viewer(session, initial_frame=0)
 
     ui.slider.set_val(1)
@@ -1495,7 +1495,7 @@ def test_session_load_validates_source_before_mutating(tmp_path):
 def test_save_and_load_buttons_restore_confirmed_range_and_display(tmp_path):
     reader = FileBackedFakeReader(make_frames(count=10), tmp_path / "sample.seq")
     store = SelectionStore(tmp_path / "selections")
-    session = ViewerSession(reader, selection_store=store)
+    session = ViewerSession(reader, selection_store=store, vmin=1.05, vmax=5.95)
     target = store.path_for(reader.path)
     dialogs = FakeSelectionDialogs(save=target, load=target)
     ui = build_viewer(session, dialogs=dialogs)

@@ -8,8 +8,8 @@ from matplotlib.widgets import TextBox
 
 NAV_RECTS = {"process": (0.08, 0.955, 0.13, 0.032), "measure": (0.22, 0.955, 0.13, 0.032),
              "open": (0.82, 0.955, 0.13, 0.032)}
-MEASURE_IMAGE_RECT = (0.075, 0.61, 0.46, 0.29)
-MEASURE_COLORBAR_RECT = (0.55, 0.61, 0.018, 0.29)
+MEASURE_IMAGE_RECT = (0.075, 0.59, 0.46, 0.22)
+MEASURE_COLORBAR_RECT = (0.55, 0.59, 0.018, 0.22)
 MEASURE_CURRENT_RECT = (0.15, 0.535, 0.48, 0.025)
 MEASURE_RESULT_RECT = (0.12, 0.25, 0.76, 0.19)
 MEASURE_CURVE_TEMP_RECT = (0.12, 0.355, 0.76, 0.085)
@@ -17,13 +17,13 @@ MEASURE_CURVE_DELTA_RECT = (0.12, 0.25, 0.76, 0.09)
 
 # Shared controls; page integration positions the surrounding page regions.
 COLOR_SCALE_RECTS = {
-    "fixed": (.08, .465, .12, .035),
-    "per_frame": (.21, .465, .14, .035),
-    "minimum": (.40, .465, .10, .035),
-    "maximum": (.54, .465, .10, .035),
-    "apply": (.66, .465, .09, .035),
-    "auto": (.76, .465, .13, .035),
-    "cancel": (.79, .417, .10, .032),
+    "fixed": (.08, .895, .12, .035),
+    "per_frame": (.21, .895, .14, .035),
+    "minimum": (.40, .895, .10, .035),
+    "maximum": (.54, .895, .10, .035),
+    "apply": (.66, .895, .09, .035),
+    "auto": (.76, .895, .13, .035),
+    "cancel": (.90, .895, .08, .035),
 }
 
 
@@ -50,7 +50,7 @@ EDITOR_RECTS = {
 }
 # All information is top-aligned: multi-line text grows into its own region.
 TEXT_POSITIONS = {
-    "color_scale": (.08, .448),
+    "color_scale": (.08, .880),
     "export": (0.15, 0.235),
     "progress": (0.15, 0.145),
     "editor_status": (0.15, 0.190),

@@ -52,7 +52,9 @@ class MeasurePanel:
         self.frame_count = 1
         self.on_calculate = self.on_cancel = None
         self.on_save_setup = self.on_export = None
+        self.can_calculate = lambda: True
         self.can_export = lambda: False
+        self.can_export_kind = lambda kind: self.can_export()
         self.on_export_height = None
         self.can_export_height = lambda kind: False
         self.on_interaction_change = None
@@ -75,7 +77,7 @@ class MeasurePanel:
 
         self.row_buttons, self.row_checks = [], []
         for row in range(self.PAGE_SIZE):
-            y = .875 - row * .033
+            y = .800 - row * .025
             checkbox = CheckButtons(axes((.695, y, .026, .025)), [""], [False])
             button = Button(axes((.727, y, .225, .025)), "")
             button.label.set_parse_math(False)
@@ -84,23 +86,23 @@ class MeasurePanel:
             checkbox.on_clicked(lambda label, row=row: self._check_row(row))
             self.row_buttons.append(button)
             self.row_checks.append(checkbox)
-        self.previous_button = Button(axes((.695, .736, .118, .025)), "Previous")
-        self.next_button = Button(axes((.830, .736, .122, .025)), "Next")
-        self.add_button = Button(axes((.695, .696, .118, .027)), "Add ROI", role="primary")
-        self.delete_button = Button(axes((.830, .696, .122, .027)), "Delete", role="danger")
-        self.name_box = TextBox(axes((.695, .645, .257, .027)), "Name", initial="")
+        self.previous_button = Button(axes((.695, .700, .118, .025)), "Previous")
+        self.next_button = Button(axes((.830, .700, .122, .025)), "Next")
+        self.add_button = Button(axes((.695, .670, .118, .027)), "Add ROI", role="primary")
+        self.delete_button = Button(axes((.830, .670, .122, .027)), "Delete", role="danger")
+        self.name_box = TextBox(axes((.695, .615, .257, .027)), "Name", initial="")
         self.name_box.text_disp.set_parse_math(False)
         self.name_box.text_disp.set_clip_on(True)
         self.name_box.text_disp.set_clip_path(self.name_box.ax.patch)
-        self.geometry_boxes = {name: TextBox(axes((.695 + .067 * i, .592, .056, .025)), name, initial="")
+        self.geometry_boxes = {name: TextBox(axes((.695 + .067 * i, .565, .056, .025)), name, initial="")
                                for i, name in enumerate(("x", "y", "width", "height"))}
         for box in (self.name_box, *self.geometry_boxes.values()):
             label_above(box)
             box.label.set_fontsize(LABEL_FONT_SIZE)
-        self.page_text = figure.text(.695, .915, "", fontsize=9, va="top")
-        self.error_text = figure.text(.695, .585, "", color="crimson", fontsize=6.5, va="top")
-        self.stats_text = figure.text(.695, .578, "Add an ROI to inspect temperatures", fontsize=8.5, va="top")
-        self.analysis_note = figure.text(.075, .942, "", fontsize=9, va="top", parse_math=False)
+        self.page_text = figure.text(.695, .840, "", fontsize=9, va="top")
+        self.error_text = figure.text(.695, .555, "", color="crimson", fontsize=6.5, va="top")
+        self.stats_text = figure.text(.695, .561, "Add an ROI to inspect temperatures", fontsize=8.5, va="top")
+        self.analysis_note = figure.text(.075, .845, "", fontsize=9, va="top", parse_math=False)
         self.current_button = Button(axes((.08, .482, .12, .026)), "Current frame")
         self.curves_button = Button(axes((.21, .482, .12, .026)), "Frame curves")
         self.height_button = Button(axes((.34, .482, .145, .026)), "Height analysis")
@@ -401,7 +403,7 @@ class MeasurePanel:
             self.stats_text.set_text(
                 f"Mean {number(stats.mean_c)} °C | Min {number(stats.min_c)} °C\n"
                 f"Max {number(stats.max_c)} °C | ROI range {number(stats.delta_c)} °C\n"
-                f"Std {number(stats.std_c)} °C (ddof=0)\n"
+                f"Std {number(stats.std_c)} °C (ddof=0) | "
                 f"Valid pixels {stats.valid_pixels}/{stats.total_pixels}"
                 + (f" ({stats.total_pixels - stats.valid_pixels} excluded)" if stats.valid_pixels < stats.total_pixels else ""))
             self.analysis_note.set_text(self.selected.name[:34] + (
@@ -455,14 +457,12 @@ class MeasurePanel:
         settings = self.state.settings
         ready = self.visible and not self.busy and not self.adding
         self.save_setup_button.set_active(ready)
-        for button in (self.export_csv_button, self.export_png_button):
-            button.set_active(ready and self.can_export())
         height = settings.result_view == 'height'
         self.stats_text.set_visible(self.visible and not height)
         self.export_csv_button.ax.set_visible(self.visible and not height)
-        self.export_csv_button.set_active(ready and not height and self.can_export())
+        self.export_csv_button.set_active(ready and not height and self.can_export_kind("csv"))
         self.export_png_button.ax.set_visible(self.visible and not height)
-        self.export_png_button.set_active(ready and not height and self.can_export())
+        self.export_png_button.set_active(ready and not height and self.can_export_kind("png"))
         self.save_setup_button.ax.set_position((.09, .16, .13, .027) if height else (.15, .16, .17, .027))
         self.export_png_button.ax.set_position((.77, .16, .13, .027) if height else (.55, .16, .17, .027))
         if self.delta_axes is not None:
@@ -490,7 +490,7 @@ class MeasurePanel:
             button.ax.set_visible(visible)
             button.set_active(visible and not self.busy)
         self.calculate_button.set_active(self.visible and settings.result_view in ("curves", 'height')
-                                          and not self.busy and not self.adding and bool(settings.rois))
+                                          and not self.busy and not self.adding and bool(settings.rois) and self.can_calculate())
         self.cancel_button.set_active(self.visible and settings.result_view in ("curves", 'height') and self.busy)
         for button, value in ((self.mean_button, "mean"), (self.min_button, "min"), (self.max_button, "max")):
             button.set_selected(settings.curve_metric == value)
