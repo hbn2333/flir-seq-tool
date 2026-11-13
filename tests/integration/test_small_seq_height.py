@@ -1,6 +1,7 @@
 """Real height CSV and window flow using three frames of the smallest read-only SEQ."""
 
 import csv
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -55,6 +56,12 @@ def test_real_height_csv_calibration_sidecar_and_same_window_switch(tmp_path):
         session.measurement.settings = settings
         ui = build_viewer(session, dialogs=dialogs)
         try:
+            deadline = time.monotonic() + 30
+            while session.color_controller.blocks_heavy_tasks:
+                assert time.monotonic() < deadline, 'color scan exceeded deadline'
+                ui.poll_color_scale()
+                time.sleep(.01)
+            assert session.color_controller.status == 'complete'
             ui.pages.switch('measure')
             ui.measure_panel.on_calculate()
             finish(ui.analysis_job)
@@ -121,7 +128,7 @@ def test_real_height_csv_calibration_sidecar_and_same_window_switch(tmp_path):
                 assert doc.provenance[0].start_frame == 10
                 assert doc.provenance[0].frame_count == 3
         finally:
-            ui.shutdown_analysis(wait=True)
+            ui.dispose(wait=True)
             plt.close(ui.figure)
     window = ViewerWindow(dialogs=dialogs)
     try:

@@ -32,6 +32,34 @@ def _wait_video(job, *, cancel_encoding=False):
         job.close()
 
 
+def _wait_color_scale(controller, poll_ui, *, timeout=30):
+    """Agg has no running GUI timer: poll explicitly and retire on failure."""
+    deadline = time.monotonic() + timeout
+    try:
+        while controller.blocks_heavy_tasks or controller.status == 'scanning':
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Frozen color scale acceptance timed out')
+            poll_ui()
+            time.sleep(.01)
+        if controller.status != 'complete':
+            raise RuntimeError(f'Frozen color scale failed: {controller.error}')
+    except BaseException:
+        controller.close(wait=True)
+        raise
+
+
+def _assert_frame_scale(image, values):
+    import numpy as np
+    finite = np.asarray(values)[np.isfinite(values)]
+    assert finite.size, 'diagnostic frame has no finite temperatures'
+    low, high = float(finite.min()), float(finite.max())
+    if low == high:
+        low, high = low - .5, high + .5
+    assert (image.norm.vmin, image.norm.vmax) == (low, high), 'image scale differs from frame'
+    assert (image.colorbar.norm.vmin, image.colorbar.norm.vmax) == (low, high), 'colorbar scale differs from frame'
+    return low, high
+
+
 def _loaded_libraries():
     import ctypes
     from ctypes import wintypes
@@ -62,15 +90,16 @@ def diagnose(source, output):
     import numpy as np
     import tkinter as tk
     import tempfile
-    from matplotlib.backend_bases import CloseEvent
+    from dataclasses import replace
     import fnv
     from .reader import ScienceFileReader
     from .viewer import ViewerSession, build_viewer
-    from .transform import FrameTransform
+    from .transform import FrameTransform, CropRect
     from .frame_transformer import FrameTransformer
     from .measurement_models import Roi, MeasurementSettings
     from .height_models import HeightSettings
     from .viewer_window import ViewerWindow
+    from .selection import SelectionStore
     from .measurement_stats import summarize
     from .measurement_store import ResultStore
     from .extraction import (build_export_request, preflight_export, run_export,
@@ -128,6 +157,54 @@ def diagnose(source, output):
                 confirm=lambda *a, **k: True, choose_unsaved_action=lambda *a: 'discard')
             ui = build_viewer(session, dialogs=diagnostics_dialogs)
             try:
+                # Scope the automatic scan to this short interval and a real center crop.
+                original_transform = session.applied_transform
+                original_measurement = session.measurement.settings
+                h, w = transformed.shape
+                session.apply_transform(replace(original_transform,
+                    crop=CropRect(w//4, h//4, max(1, w//2), max(1, h//2))))
+                session.color_controller.request_auto()
+                _wait_color_scale(session.color_controller, ui.poll_color_scale)
+                lows, highs = [], []
+                for index in range(first, last + 1):
+                    values = session.frame_transformer.apply(reader.temperature_frame_at(index).temperature_c)
+                    finite = values[np.isfinite(values)]
+                    if finite.size:
+                        lows.append(float(finite.min()))
+                        highs.append(float(finite.max()))
+                expected = (min(lows), max(highs))
+                if expected[0] == expected[1]:
+                    expected = (expected[0] - .5, expected[1] + .5)
+                actual = session.color_scale.render_snapshot().limits
+                assert (actual.vmin, actual.vmax) == expected
+                report['color_scale_auto'] = dict(range_c=expected, frames=last-first+1,
+                    scope=session.color_scale.settings.auto_scope.to_dict())
+                report['checks'].append('color_scale_auto')
+                session.selection_store = SelectionStore(output / 'selections')
+                saved = session.save_selection()
+                payload = json.loads(saved.read_text(encoding='utf-8'))
+                assert payload['schema_version'] == 5
+                display = session.color_scale.settings
+                session.color_scale.apply_manual(20, 40)
+                session.load_selection(saved)
+                assert session.color_scale.settings == display
+                report['checks'].append('selection_v5')
+                session.color_scale.select_mode('per_frame')
+                ui.poll_color_scale()
+                ranges = []
+                for local in range(last-first+1):
+                    ui.slider.set_val(local)
+                    ranges.append(_assert_frame_scale(ui.image,
+                        session.frame_at_local(local).temperature_c))
+                report['color_scale_per_frame'] = dict(ranges_c=ranges)
+                report['checks'].append('color_scale_per_frame')
+                adaptive_video_request = build_video_request(session, output / 'per-frame.mp4', 1)
+                # Retain the manual diagnostic's ROI, range and video assumptions.
+                session.color_scale.apply_manual(20, 40)
+                session.apply_transform(original_transform)
+                session.measurement.settings = original_measurement
+                ui.slider.set_val(0)
+                ui.poll_color_scale()
                 ui.figure.savefig(output / 'process.png')
                 ui.pages.switch('measure')
                 ui.figure.savefig(output / 'measure.png')
@@ -162,7 +239,7 @@ def diagnose(source, output):
                 ui.figure.savefig(output / 'height.png')
                 report['checks'].append('height_analysis_full_and_zones_csv')
             finally:
-                ui.figure.canvas.callbacks.process('close_event', CloseEvent('close_event', ui.figure.canvas))
+                ui.dispose(wait=True)
                 plt.close(ui.figure)
             video_request = build_video_request(session, output / 'five-frames.mp4', 1)
             # A full short sequence gives enough work to exercise encoding cancel.
@@ -190,6 +267,8 @@ def diagnose(source, output):
             window.close(wait=True)
             if window.figure is not None:
                 plt.close(window.figure)
+        report['adaptive_video'] = _wait_video(VideoJob(adaptive_video_request))
+        report['checks'].append('video_spawn_per_frame_policy')
         report['video'] = _wait_video(VideoJob(video_request))
         report['checks'].append('video_spawn_encode_full_decode')
         report['cancel'] = _wait_video(VideoJob(cancel_request), cancel_encoding=True)
