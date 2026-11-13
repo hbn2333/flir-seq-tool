@@ -198,8 +198,8 @@ if schema_version >= 4:
 - 新建 `src/flir_seq_tool/color_scale_job.py`、`tests/unit/test_color_scale_job.py`。
 - 复用 `measurement_job.AnalysisProgress`、`validate_reader_identity()`、`FrameTransformer`。
 
-- [ ] **1. 建立纯读 fake reader 和冻结输入 fixture。** fake 构造函数只保存已有帧和路径，不写 source。测试临时 source 在 fixture 中只创建一次。分别记录 `temperature_frame_at()` 与 `timestamp_at()` 请求，身份核验的端点时间读取与实际扫描温度帧分开断言。
-- [ ] **2. 写完整扫描和失败/取消用例并运行 RED。** 后段 40 °C、裁剪外 100 °C、选区范围、单帧常值、混合全无效帧、全无效失败、读取异常、扫描中源 mtime 变化、取消前/中/最终发布前均须覆盖。以下为线程主入口的真实契约。
+- [x] **1. 建立纯读 fake reader 和冻结输入 fixture。** fake 构造函数只保存已有帧和路径，不写 source。测试临时 source 在 fixture 中只创建一次。分别记录 `temperature_frame_at()` 与 `timestamp_at()` 请求，身份核验的端点时间读取与实际扫描温度帧分开断言。
+- [x] **2. 写完整扫描和失败/取消用例并运行 RED。** 后段 40 °C、裁剪外 100 °C、选区范围、单帧常值、混合全无效帧、全无效失败、读取异常、扫描中源 mtime 变化、取消前/中/最终发布前均须覆盖。以下为线程主入口的真实契约。
 
 ```python
 outcome = run_color_scale(request, reader_factory=factory,
@@ -215,7 +215,7 @@ assert reader.closed
 & .\.packaging\venv\Scripts\python.exe -B -m pytest tests/unit/test_color_scale_job.py -q --tb=short -p no:cacheprovider --basetemp .packaging/tmp/scale-task3-red
 ```
 
-- [ ] **3. 实现 Context/Request/Outcome 和 worker。** Context 校验原始范围、维度和 transform，request 校验正代次与非空会话 token。逐帧主体使用以下累计方式，前后调用已有身份核验，取消后返回 `limits=None`，异常 outcome 带当前原始帧号。
+- [x] **3. 实现 Context/Request/Outcome 和 worker。** Context 校验原始范围、维度和 transform，request 校验正代次与非空会话 token。逐帧主体使用以下累计方式，前后调用已有身份核验，取消后返回 `limits=None`，异常 outcome 带当前原始帧号。
 
 ```python
 minimum = maximum = None
@@ -238,8 +238,8 @@ for completed, source_index in enumerate(range(context.source_start, context.sou
 
 无有限值时失败；全部完成且再次通过身份/取消检查后调用 `limits_from_extrema()`。线程只执行读取、变换和累计，不访问 artist，不保存全部帧，也不创建 SQLite。
 
-- [ ] **4. 实现 ColorScaleJob 生命周期并验证通过。** 线程使用非 daemon、独立 SDK reader，复用现有 start/cancel/join 风格。测试取消后 reader 关闭、无 complete/partial limits 泄漏和内存中不积累帧引用。重跑任务 1～3 的目标测试，退出码 0。
-- [ ] **5. 提交新模块和测试。** 提交信息 `feat: scan confirmed temperature ranges in a read-only worker`。
+- [x] **4. 实现 ColorScaleJob 生命周期并验证通过。** 线程使用非 daemon、独立 SDK reader，复用现有 start/cancel/join 风格。测试取消后 reader 关闭、无 complete/partial limits 泄漏和内存中不积累帧引用。重跑任务 1～3 的目标测试，退出码 0。
+- [x] **5. 提交新模块和测试。** 提交信息 `feat: scan confirmed temperature ranges in a read-only worker`。
 
 ## Task 4：配置、派生显示值与输入草稿分离
 

@@ -16,8 +16,8 @@
 | --- | --- | --- |
 | 1 有限极值与范围标识 | 完成 | `aa19b56`；RED 缺少接口，GREEN 42 passed；独立规格、质量审查均通过，各复测 42 passed |
 | 2 selection v5 | 完成 | `5e72b3f`；RED 33 failed、130 passed；GREEN 160 passed；独立规格复测 160 passed，质量审查通过 |
-| 3 独立扫描 worker | 实施中 | — |
-| 4 温标状态与输入草稿 | 未开始 | — |
+| 3 独立扫描 worker | 完成 | `9e9eb2b`；RED 缺少模块；GREEN 187 passed（42 新 worker 测试）；独立规格复测 42 passed，质量审查通过 |
+| 4 温标状态与输入草稿 | 实施中 | — |
 | 5 扫描调度控制器 | 未开始 | — |
 | 6 控件、会话与窗口事务 | 未开始 | — |
 | 7 PNG 与子 SEQ 配置 | 未开始 | — |
