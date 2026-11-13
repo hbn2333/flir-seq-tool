@@ -23,7 +23,7 @@
 | 7 PNG 与子 SEQ 配置 | 完成 | `690a213`；RED 13 failed、97 passed，GREEN 113 passed；独立规格复测 113 passed，质量审查通过；PNG 实际温标、模式提示与元数据核验通过 |
 | 8 MP4 模式跟随 | 完成 | `f86a1c1`；RED 15 failed、21 passed，边界布局 RED 3 failed；GREEN 70 passed（含编码及时间轴）；独立规格 41 passed，质量审查通过 |
 | 9 布局与滑块性能 | 完成 | `c7f9be0`、`273b1aa`；输入、统计、错误及坐标标签均先复现 RED；93 项定向回归，独立规格 74 + 18 passed，质量实鼠标/键盘验证通过；测试覆盖有重叠，不相加 |
-| 10 真实 SEQ、冻结版与交付 | 集成通过，待完整回归与冻结验收 | `4e3af2f`；新增诊断 helper RED 3 failed，最小样本/Q1/高度/诊断 GREEN 10 passed，待独立审查、新 EXE 与交付 |
+| 10 真实 SEQ、冻结版与交付 | 完成，交用户人工试用 | `4e3af2f`、`f7a3ede`；完整回归分四组 1263 passed、14 skipped、0 failed/error；最终 r2 EXE 的 14 项诊断及源码/包内文件核验通过，独立规格与质量复审通过 |
 
 本记录随实际完成情况更新。实施中的任务和未执行的验收不计为通过。
 
@@ -57,4 +57,39 @@
 
 当前 Q1 的 2,934 帧再次通过完整扫描及独立参考遍历，范围精确一致，为 22.704004287719727～50.90658950805664 °C，最高温出现在源帧 2,930。此次 worker 耗时 12.21 s，参考遍历 12.58 s；源帧 1～4 和中心裁剪的范围为 23.538602828979492～25.249067306518555 °C。报告保存在忽略目录 `.packaging/tmp/scale-task10-target/test_q1_complete_identity_and_0/q1-color-scale.json`。设计阶段抽查使用的是当时 Q1 路径对应的另一份文件身份，最终验收以此处当前文件身份为准，不混用两个记录。
 
-完整测试、新 EXE 构建与冻结诊断在下述最终验收完成前仍不计为通过。
+最终完整回归、构建及冻结诊断结果见下文；首次失败与后续修复记录均保留。
+
+## 完整回归发现与修复
+
+首次完整串行运行耗时 1540.94 s，结果为 1261 passed、2 failed、14 skipped、14 条依赖警告和 1 条 teardown error，日志为 `.packaging/color-scale-full-tests.log`，保留此失败记录。
+
+其中真正的产品回归是开始重算时的同步通知顺序：measurement 已标记 running，但页面尚未标记 analysis busy，温标控制器通知触发页面刷新，导致旧有效曲线被清空。`f7a3ede` 先发布页面 busy 状态，再通知温标控制器；测试明确要求重算期间及取消后保留非空的原曲线 artist 和结果。其余两处是测试配置：旧 MP4 生命周期用例改用显式手动温标，清理阶段移除模拟过期回调的裸 object 哨兵；没有削弱生产代码的自动范围校验或资源契约。
+
+三项原始问题独立复现 RED，修复后 3 passed，相关完整工作流定向回归 83 passed。独立规格及质量复审均通过。作者启动过一轮重复的宽范围测试，因随后由主代理统一执行完整验证而中断；该中断运行不算通过。
+
+修复后以完整收集列表的 1277 项用例为依据，将 63 个测试文件分成四个互不重复的集合，检查集合并集与完整收集列表一致，分别使用独立进程和 basetemp 执行。没有安装新插件或省略失败用例。各组清单及日志位于 `.packaging/color-scale-shards.json`、`.packaging/color-scale-shard-*.txt` 和 `.packaging/color-scale-final-shard-*.log`。
+
+| 组 | 通过 | 跳过 | 耗时 / s |
+| --- | ---: | ---: | ---: |
+| 1 | 720 | 14 | 204.20 |
+| 2 | 108 | 0 | 381.68 |
+| 3 | 269 | 0 | 673.81 |
+| 4 | 166 | 0 | 454.84 |
+
+最终总计 **1263 passed、14 skipped、0 failed、0 error**。四组均退出 0；重新收集并核对全部 1277 个唯一 node id，无重复或遗漏。汇总为 `.packaging/color-scale-final-tests-summary.json`。每个进程各发出 14 条相同的既有 Pyparsing 依赖弃用警告；14 项跳过包括 12 项历史指定 SEQ 缺失用例和 2 项 Windows 符号链接权限用例。本轮新增最小样本、Q1 和高度测试实际通过。
+
+## 修复后冻结版
+
+交付候选目录为 `dist/portable/color-scale-20261113-r2/FLIR_SEQ_Tool`，源代码提交为 `f7a3ede`，构建时工作区干净。较早的 `color-scale-20261113` 候选和已有旧版均保留，不作为本次最终交付。
+
+新 EXE 以 Hidden 方式运行诊断，实际只读打开最小真实样本，14 项检查全部 passed，包含包内临时目录/SQLite、Tk、SDK 温度、变换与 ROI、自动扫描、逐帧图像/色条、v5、页面、高度/分区 CSV、原生提取、同窗切源、逐帧 MP4、固定 MP4 完整解码及取消。报告为 `.packaging/color-scale-frozen-r2/diagnostics.json`。
+
+对 62 个构建源码文件和 2015 个包内文件逐个核对 SHA256，与 manifest 一致。SDK、Python、Tk 和 VC runtime 均从包内路径加载，FFmpeg 为包内工具，缓存与 SQLite 位于包内 cache。核验记录为 `.packaging/color-scale-bundle-verification-r2.json`。构建日志有一条 `scipy.special._cdflib` hidden import 警告，无构建错误；上述冻结诊断对应功能全部通过。
+
+原始清单的七份 SEQ 大小和 mtime ticks 仍一致，当前 Q1 也与本轮独立记录的大小及 mtime_ns 一致。原生窗口人工试用和独立干净电脑验收留待用户完成；离屏鼠标/键盘回归与本机冻结诊断不替代这两项。
+
+## 交付状态
+
+实现、定向及完整回归、真实数据核对、冻结诊断和独立规格/质量审查均完成，可操作审查问题已关闭。最终 EXE 为 `D:\carbonfoam\infrared\dist\portable\color-scale-20261113-r2\FLIR_SEQ_Tool\FLIR_SEQ_Tool.exe`，需保留整个软件文件夹。原 EXE 和首次候选未被覆盖。
+
+代码保留在 `codex/color-scale-modes-design` 分支。构建包含 `f7a3ede` 的生产源码；其后验收文档提交不改变包内源码 SHA256。本轮没有合并 main、推送 GitHub 或更新 Release，等待用户本地试用后的进一步指示。

@@ -2,13 +2,13 @@
 
 日期为 2026-11-13，时区 Asia/Shanghai。
 
-状态为用户已于 2026-11-13 审核通过，并要求编写实施计划。代码基线为 `c49858b`。实施步骤见 [实施计划](../plans/2026-11-13-flir-seq-color-scale-modes.md)。
+状态为用户已于 2026-11-13 审核通过，已按计划实现并完成本地自动验收，交用户人工试用。代码基线为 `c49858b`。实施步骤见 [实施计划](../plans/2026-11-13-flir-seq-color-scale-modes.md)，最终数据身份、完整回归、EXE 及人工验收边界见 [执行记录](../plans/2026-11-13-flir-seq-color-scale-modes-execution.md)。
 
 唯一工作目录为 `D:\carbonfoam\infrared`。原始 SEQ 保持只读，构建、缓存和测试输出使用项目内目录。继续沿用文字设计方式。
 
 ## 1. 问题与只读核查
 
-当前 `ViewerSession.frame_at()` 在温标尚未初始化时，对首次显示帧调用 `compute_color_limits()`。该函数使用有限温度的第 1、99 百分位，之后沿用这个范围。显式命令行上下限和已加载的 selection 温标具有优先权。
+实现前的 `ViewerSession.frame_at()` 在温标尚未初始化时，对首次显示帧调用 `compute_color_limits()`。该函数使用有限温度的第 1、99 百分位，之后沿用这个范围。显式命令行上下限和已加载的 selection 温标具有优先权。
 
 2026-11-13 使用官方 SDK 只读抽查 `raw/Q1.seq`。文件有 3260 帧，每帧为 640×480。以下为三个实际读取帧的范围，未扫描其他帧，因此这张表不代表整个 SEQ 的最终极值。
 

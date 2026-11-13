@@ -505,8 +505,8 @@ if self.display.scale_mode == "per_frame":
 - 修改 `src/flir_seq_tool/portable_diagnostics.py`、`tests/unit/test_portable_diagnostics.py`。
 - 修改 `README.md`、`CHANGELOG.md`、设计状态，创建本计划开头指定的执行记录。
 
-- [ ] **1. 写小样本集成 RED。** 动态选择当前 raw 中最小 SEQ，只读验证 3～5 帧，选择实际可用中心 crop。新模块的 `SMALL_SEQ` 使用动态选择，缺失时明确 skip 原因。使用独立参考遍历汇总 transformed 有限值，与完成 job 范围一致；per_frame 切前后帧，检查 image/colorbar；保存和重载 v5；原生小子 SEQ 自动 scope 失效并重算。输出全部在 tmp_path，fixture 使用现有 raw 前后元数据核验。
-- [ ] **2. 执行 Q1 全范围验证。** 在新模块单独用例选择 `D:\carbonfoam\infrared\raw\Q1.seq`，identity transform、全部帧，独立 reader 第二次逐帧累计 NumPy min/max。比较结果精确一致，确认完成帧数与 reader.num_frames 一致，最后一帧高温得到覆盖。之后选较小确认范围与裁剪矩形，核对新 scope 和新范围。记录耗时、初末温标、全局范围和 raw 大小/mtime。缺少 Q1 时报告该项未验证，不能把最小样本结果代作通过。
+- [x] **1. 写小样本集成 RED。** 动态选择当前 raw 中最小 SEQ，只读验证 3～5 帧，选择实际可用中心 crop。新模块的 `SMALL_SEQ` 使用动态选择，缺失时明确 skip 原因。使用独立参考遍历汇总 transformed 有限值，与完成 job 范围一致；per_frame 切前后帧，检查 image/colorbar；保存和重载 v5；原生小子 SEQ 自动 scope 失效并重算。输出全部在 tmp_path，fixture 使用现有 raw 前后元数据核验。
+- [x] **2. 执行 Q1 全范围验证。** 在新模块单独用例选择 `D:\carbonfoam\infrared\raw\Q1.seq`，identity transform、全部帧，独立 reader 第二次逐帧累计 NumPy min/max。比较结果精确一致，确认完成帧数与 reader.num_frames 一致，最后一帧高温得到覆盖。之后选较小确认范围与裁剪矩形，核对新 scope 和新范围。记录耗时、初末温标、全局范围和 raw 大小/mtime。缺少 Q1 时报告该项未验证，不能把最小样本结果代作通过。
 
 ```python
 reference_min = reference_max = None
@@ -523,7 +523,7 @@ assert outcome.limits == limits_from_extrema(reference_min, reference_max)
 
 测试等待 worker 用明确 deadline，超时先 cancel/join，测试结束无存活线程；不得把等待中的任务标为完成。
 
-- [ ] **3. 跑新增、相关与完整套件。** 先局部测试定位故障，局部通过后完整运行一次并保存日志。依赖弃用警告、旧固定路径缺失造成的 skip 单独记录。
+- [x] **3. 跑新增、相关与完整套件。** 先局部测试定位故障，局部通过后完整运行一次并保存日志。依赖弃用警告、旧固定路径缺失造成的 skip 单独记录。
 
 ```powershell
 & .\.packaging\venv\Scripts\python.exe -B -m pytest tests/integration/test_small_seq_color_scale.py -q -rs --tb=short -p no:cacheprovider --basetemp .packaging/tmp/scale-real
@@ -532,7 +532,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Real sequence validation failed' }
 if ($LASTEXITCODE -ne 0) { Get-Content .packaging/color-scale-full-tests.log -Tail 80; throw 'Regression suite failed' }
 ```
 
-- [ ] **4. 扩展冻结诊断并构建独立本地 bundle。** 现有 diagnose 手动 20～40 用例继续保留。追加小范围完整扫描、per_frame bounds 和 v5 保存检查；用明确 join/poll，避免 Agg timer 未运行；所有 worker 在 finally 中回收。构建前确保目标目录不存在，复用现有环境，保留旧 bundle。
+- [x] **4. 扩展冻结诊断并构建独立本地 bundle。** 现有 diagnose 手动 20～40 用例继续保留。追加小范围完整扫描、per_frame bounds 和 v5 保存检查；用明确 join/poll，避免 Agg timer 未运行；所有 worker 在 finally 中回收。构建前确保目标目录不存在，复用现有环境，保留旧 bundle。
 
 ```powershell
 $scaleDist = Join-Path $projectRoot 'dist/portable/color-scale-20261113'
@@ -546,8 +546,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Bundle preparation failed' }
 
 用新 EXE `--diagnose` 读取最小样本并将报告写入新项目内目录，Start-Process 使用 Hidden。校验 report.status=passed 和 source_files hashes，与当前实现一致。真实原生窗口检查范围切换、编辑草稿保护、模式切换、颜色条、取消后重试、PNG/MP4 结果及窗口切源；按实际完成情况记录。人工点击未完成项留给用户验收，不以离屏测试替代。
 
-- [ ] **5. 更新用户文档并完成审查。** README 说明两个模式、完整扫描耗时/进度、手动 Apply/Auto range、颜色跨帧比较、已确认范围/裁剪统计、旧 selection 手动恢复与 MP4跟随模式。删除“默认首帧第 1/99 百分位”的现行操作说明，保留旧行为只在变更记录解释。执行记录列出真实值、通过/跳过数、bundle 路径、原生点验范围、风险与限制。独立规格审查后再做质量审查，所有可操作问题关闭再交付。
-- [ ] **6. 提交验收资料并交用户测试。** 使用明确文件列表暂存，`git diff --cached --check`，确认原始数据、SDK、视频、bundle 和缓存均未进入提交。提交 `test: validate color scale modes with real sequences` 和 `docs: explain fixed and adaptive temperature scales`，按实际文件范围拆分。交付本地 EXE、使用步骤及测试结果；用户之后授权时再合并/推送或更新 Release。
+- [x] **5. 更新用户文档并完成审查。** README 说明两个模式、完整扫描耗时/进度、手动 Apply/Auto range、颜色跨帧比较、已确认范围/裁剪统计、旧 selection 手动恢复与 MP4跟随模式。删除“默认首帧第 1/99 百分位”的现行操作说明，保留旧行为只在变更记录解释。执行记录列出真实值、通过/跳过数、bundle 路径、原生点验范围、风险与限制。独立规格审查后再做质量审查，所有可操作问题关闭再交付。
+- [x] **6. 提交验收资料并交用户测试。** 使用明确文件列表暂存，`git diff --cached --check`，确认原始数据、SDK、视频、bundle 和缓存均未进入提交。提交 `test: validate color scale modes with real sequences` 和 `docs: explain fixed and adaptive temperature scales`，按实际文件范围拆分。交付本地 EXE、使用步骤及测试结果；用户之后授权时再合并/推送或更新 Release。
 
 ## 规格覆盖自查与完成标准
 
