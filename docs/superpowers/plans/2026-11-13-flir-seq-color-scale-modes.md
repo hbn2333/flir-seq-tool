@@ -154,7 +154,7 @@ scope 使用 canonical JSON + SHA-256 生成源身份摘要，采用现有 `sour
 - 修改 `src/flir_seq_tool/selection.py`。
 - 修改 `tests/unit/test_selection.py`、`tests/unit/test_height_configuration.py`，新建 `tests/unit/test_color_scale_selection.py`。
 
-- [ ] **1. 写 v5 往返与真正旧 payload 的失败测试。** 使用 `sample_document()`，将新 display 字段从 v1～v4 payload 中实际移除。v1/v2 同时按旧格式删除根字段；v3 保持旧 measurement 格式。保留现有 migration fixture，不批量替换历史版本号。
+- [x] **1. 写 v5 往返与真正旧 payload 的失败测试。** 使用 `sample_document()`，将新 display 字段从 v1～v4 payload 中实际移除。v1/v2 同时按旧格式删除根字段；v3 保持旧 measurement 格式。保留现有 migration fixture，不批量替换历史版本号。
 
 ```python
 def test_v5_per_frame_preserves_remembered_fixed_values(tmp_path):
@@ -171,13 +171,13 @@ def test_v5_per_frame_preserves_remembered_fixed_values(tmp_path):
 
 另外覆盖 manual 携带非空 scope 拒绝、auto scope 严格解析、缺失/多余字段、v4 多层 provenance 与 mm 标定保留。保存和加载都不改写输入旧文件。
 
-- [ ] **2. 运行失败测试。**
+- [x] **2. 运行失败测试。**
 
 ```powershell
 & .\.packaging\venv\Scripts\python.exe -B -m pytest tests/unit/test_color_scale_selection.py tests/unit/test_selection.py tests/unit/test_height_configuration.py -q --tb=short -p no:cacheprovider --basetemp .packaging/tmp/scale-task2-red
 ```
 
-- [ ] **3. 扩展 DisplaySettings，保留前三个位置参数。** 追加 `scale_mode='fixed'`、`fixed_source='manual'`、`auto_scope=None`，严格解析当前版，旧版显式补默认值。相应核心迁移条件采用以下形式，保留其已有 list/type 校验。
+- [x] **3. 扩展 DisplaySettings，保留前三个位置参数。** 追加 `scale_mode='fixed'`、`fixed_source='manual'`、`auto_scope=None`，严格解析当前版，旧版显式补默认值。相应核心迁移条件采用以下形式，保留其已有 list/type 校验。
 
 ```python
 legacy_display = schema_version < 5
@@ -188,8 +188,8 @@ if schema_version >= 4:
 
 根 schema 校验显式接受 1～5，每版 keys 集合准确匹配。`SCHEMA_VERSION=5`。auto_scope 是否匹配当前实际恢复范围由状态/会话层判断，配置解析只负责结构、基本数值和策略合法性。
 
-- [ ] **4. 重跑上述测试及原生配套配置现有测试。** 添加 `tests/unit/test_export_bundle.py`，basetemp 使用 `scale-task2-green`。已知当前版 schema 断言改为 5，真正 v4 用例继续保持 4 输入。
-- [ ] **5. 提交本项文件。** 提交信息 `feat: persist color scale modes in selection v5`。
+- [x] **4. 重跑上述测试及原生配套配置现有测试。** 添加 `tests/unit/test_export_bundle.py`，basetemp 使用 `scale-task2-green`。已知当前版 schema 断言改为 5，真正 v4 用例继续保持 4 输入。
+- [x] **5. 提交本项文件。** 提交信息 `feat: persist color scale modes in selection v5`。
 
 ## Task 3：独立只读全段温标扫描
 
