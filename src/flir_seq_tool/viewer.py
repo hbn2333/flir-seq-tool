@@ -800,7 +800,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         0.5, 0.945, "Enlarge window to at least 1000 x 800 logical pixels",
         ha="center", va="top", fontsize=9, color="crimson", visible=False,
     )
-    details_notice = figure.text(0.08, 0.016, "", fontsize=7, va="top")
+    details_notice = figure.text(0.08, 0.080, "", fontsize=7, va="top")
     export_state = ViewerExportState()
     mode_state = ViewerModeState()
     analysis_state = ViewerAnalysisState()
@@ -1808,8 +1808,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
             text.right_edge = .95 if measure else (.72 if text.key in ("transform", "timeline") else .97)
         transform_editor.status_text.right_edge = .97
         transform_editor.error_text.right_edge = .97
-        status_text.max_lines = 2 if measure else 1
-        details_notice.set_x(.15 if measure else .08)
+        details_notice.set_position((.15, .016) if measure else (.08, .080))
         _set_frame_title(axes, current_frame, session.reader.num_frames,
                          session.timeline.current_local_frame, session.timeline.local_num_frames,
                          multiline=not measure)

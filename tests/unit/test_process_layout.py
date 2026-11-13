@@ -88,3 +88,26 @@ def test_process_and_editor_rendered_decorations_clear_rail_and_status(make_meas
         if editing:
             ui.transform_editor.cancel_button._observers.process("clicked", None)
             assert ui.range_slider.active
+
+
+@pytest.mark.parametrize("size", [(10, 8), (25.6, 14.4)])
+def test_process_footer_keeps_time_information_visible(make_measure_ui, monkeypatch, size):
+    from conftest import SyntheticReader
+    initialize = SyntheticReader.__init__
+    def initialize_long_recording(reader, path):
+        initialize(reader, path)
+        reader.num_frames = 2934
+    monkeypatch.setattr(SyntheticReader, "__init__", initialize_long_recording)
+    ui = make_measure_ui(defer_color_scan=True)
+    ui.figure.set_size_inches(*size)
+    ui.slider.set_val(2)
+    ui.figure.canvas.draw()
+    displayed = ui.status_text.get_text()
+    assert "Absolute " in displayed
+    assert "Relative " in displayed
+    assert "Duration " in displayed
+    renderer = ui.figure.canvas.get_renderer()
+    box = ui.status_text.get_window_extent(renderer)
+    assert box.y0 >= ui.figure.bbox.y0
+    assert not box.overlaps(ui.transform_status_text.get_window_extent(renderer))
+    assert not box.overlaps(ui.range_slider.ax.bbox)
