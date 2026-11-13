@@ -21,6 +21,23 @@ def auto_state():
     return state
 
 
+@pytest.mark.parametrize('loaded', [False, True])
+def test_invalidate_auto_discards_applied_and_cached_scope_only(loaded):
+    state = auto_state()
+    state.accept_auto(SCOPE, ColorLimits(10, 60))
+    if loaded:
+        state = ColorScaleState(state.settings)
+        state.set_scope(SCOPE)
+    state.edit_bounds('draft', 'kept')
+    before = state.settings
+    state.invalidate_auto()
+    assert state.settings == replace(before, auto_scope=None)
+    assert state.draft_bounds == ('draft', 'kept')
+    assert not state.fixed_ready
+    state.restore_auto()
+    assert not state.fixed_ready
+
+
 def test_pending_auto_then_complete_and_stale_result():
     state = auto_state()
     original = state.settings

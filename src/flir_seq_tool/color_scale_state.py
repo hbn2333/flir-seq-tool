@@ -134,6 +134,12 @@ class ColorScaleState:
         else:
             self._refresh()
 
+    def invalidate_auto(self) -> None:
+        """Forget automatic provenance after an external source change."""
+        self._auto_cache = None
+        self._replace_settings(auto_scope=None)
+        self._refresh()
+
     def accept_auto(self, scope: ColorScaleScope, limits: ColorLimits) -> bool:
         if (not isinstance(scope, ColorScaleScope) or scope != self._scope
                 or self.settings.scale_mode != 'fixed'
