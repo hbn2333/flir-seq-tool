@@ -73,3 +73,71 @@ def test_successful_atomic_publication(video_session, tmp_path):
     publish_video(request, partial)
     assert target.read_bytes() == b'verified video'
     assert not partial.exists()
+
+
+def scale_session(session, *, mode='fixed', source='auto', ready=False):
+    from flir_seq_tool.color_scale_state import ColorScaleState
+    from flir_seq_tool.color_scale_models import ColorScaleScope
+    from flir_seq_tool.selection import DisplaySettings
+    scope = ColorScaleScope.from_inputs(session.source_identity(), 2, 5, session.applied_transform)
+    state = ColorScaleState(DisplaySettings('magma', 10, 80, mode, source))
+    state.set_scope(scope)
+    if ready:
+        assert state.accept_auto(scope, ColorLimits(10, 80))
+    session.color_scale = state
+    return state, scope
+
+
+def test_pending_auto_blocks_video(video_session, tmp_path):
+    scale_session(video_session)
+    with pytest.raises(RuntimeError, match='Auto.*manual.*Per-frame'):
+        build_video_request(video_session, tmp_path / 'pending.mp4', 1)
+
+
+def test_ready_auto_freezes_full_confirmed_scope(video_session, tmp_path):
+    state, scope = scale_session(video_session, ready=True)
+    request = build_video_request(video_session, tmp_path / 'ready.mp4', 10)
+    assert request.display == state.settings
+    assert request.display.auto_scope == scope
+    # The full 2..5 scope, including any hot unsampled frame, is reused at 10x.
+    assert (scope.source_start, scope.source_end) == (request.start_frame, request.end_frame)
+    state.apply_manual(0, 1)
+    assert (request.display.vmin_c, request.display.vmax_c) == (10, 80)
+
+
+@pytest.mark.parametrize('change', ['source', 'range', 'transform'])
+def test_stale_auto_scope_blocks_even_if_state_ready(video_session, tmp_path, change):
+    state, _ = scale_session(video_session, ready=True)
+    if change == 'source':
+        video_session.reader.path.write_bytes(b'modified source contents')
+    elif change == 'range':
+        video_session.measure_source_range = lambda: (3, 5)
+    else:
+        from dataclasses import replace
+        from flir_seq_tool.transform import CropRect
+        video_session.applied_transform = replace(video_session.applied_transform, crop=CropRect(0, 0, 2, 2))
+    assert state.fixed_ready
+    with pytest.raises(RuntimeError, match='Auto'):
+        build_video_request(video_session, tmp_path / 'stale.mp4', 1)
+
+
+@pytest.mark.parametrize('mode,source', [('fixed', 'manual'), ('per_frame', 'auto')])
+def test_manual_and_per_frame_freeze_policy_without_matching_auto(video_session, tmp_path, mode, source):
+    state, _ = scale_session(video_session, mode=mode, source=source)
+    video_session.measure_source_range = lambda: (3, 5)
+    request = build_video_request(video_session, tmp_path / 'permitted.mp4', 1)
+    assert request.display == state.settings
+    assert (request.display.vmin_c, request.display.vmax_c) == (10, 80)
+
+
+@pytest.mark.parametrize('mode,source,label', [('fixed', 'auto', 'Fixed automatic'),
+    ('fixed', 'manual', 'Fixed manual'), ('per_frame', 'auto', 'Per-frame adaptive')])
+def test_scale_summary_describes_frozen_policy(mode, source, label):
+    from flir_seq_tool.video_export import video_scale_summary
+    from flir_seq_tool.selection import DisplaySettings
+    summary = video_scale_summary(DisplaySettings('magma', 10, 80, mode, source))
+    assert label in summary
+    if mode == 'per_frame':
+        assert '10' not in summary and '80' not in summary
+    else:
+        assert '10–80 °C' in summary

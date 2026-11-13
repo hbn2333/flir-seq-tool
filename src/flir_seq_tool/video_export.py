@@ -1,6 +1,6 @@
 """Frozen MP4 inputs and guarded publication; raw SEQ data is read-only."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import os
 from pathlib import Path
@@ -11,6 +11,7 @@ import time
 
 from .file_safety import DEFAULT_RAW_ROOT, TargetSnapshot, assert_snapshot, validate_write_path
 from .selection import DisplaySettings, SourceIdentity, transform_to_dict, transform_from_dict
+from .color_scale_models import ColorScaleScope
 from .video_timeline import VIDEO_SPEEDS
 
 
@@ -40,14 +41,34 @@ class VideoExportRequest:
 def build_video_request(session, target, speed):
     source_path = Path(session.reader.path).resolve()
     target = validate_write_path(target, source_path=source_path, raw_root=DEFAULT_RAW_ROOT)
-    limits = session.color_limits
-    if limits is None:
-        raise RuntimeError("Viewer color limits are not initialized")
     start, end = session.measure_source_range()
-    return VideoExportRequest(source_path, session.source_identity(), start, end,
+    source = session.source_identity()
+    stat = source_path.stat()
+    source = replace(source, size_bytes=stat.st_size, modified_time_ns=stat.st_mtime_ns)
+    if hasattr(session, 'color_scale'):
+        display = session.color_scale.settings
+        scope = ColorScaleScope.from_inputs(source, start, end, session.applied_transform)
+        if (display.scale_mode == 'fixed' and display.fixed_source == 'auto'
+                and display.auto_scope != scope):
+            raise RuntimeError('Automatic fixed scale is not ready for this source, range and transform. '
+                               'Retry Auto, apply manual bounds, or select Per-frame adaptive.')
+    else:
+        # Older session providers expose only the original manual display contract.
+        limits = session.color_limits
+        if limits is None:
+            raise RuntimeError("Viewer color limits are not initialized")
+        display = DisplaySettings(session.colormap, limits.vmin, limits.vmax)
+    return VideoExportRequest(source_path, source, start, end,
         json.dumps(transform_to_dict(session.applied_transform), sort_keys=True, allow_nan=False),
-        DisplaySettings(session.colormap, limits.vmin, limits.vmax), speed,
+        display, speed,
         target, TargetSnapshot.capture(target))
+
+
+def video_scale_summary(display):
+    if display.scale_mode == 'per_frame':
+        return 'Per-frame adaptive (limits follow each rendered source frame)'
+    label = 'Fixed automatic' if display.fixed_source == 'auto' else 'Fixed manual'
+    return f'{label}: {display.vmin_c:g}–{display.vmax_c:g} °C'
 
 
 def assert_request_current(request):
@@ -130,7 +151,7 @@ def _video_worker(request, messages, commands, cancel, gate, publishing, publish
                 f"Source duration: {timeline.duration_s:.6f} s | Speed: {request.speed}×\n"
                 f"Video duration: {timeline.video_duration_s:.6f} s ({timeline.frame_count} frames)\n"
                 f"1920×1080 | 30 fps | H.264 | {request.display.colormap}\n"
-                f"Fixed scale: {request.display.vmin_c:g}–{request.display.vmax_c:g} °C\n"
+                f"{video_scale_summary(request.display)}\n"
                 + ("Single source frame: 1 second still video.\n" if count == 1 else "")
                 + "Presentation video may skip/repeat source frames; it does not replace temperature data.\nExport?")
             send("ready", summary=summary, frame_count=timeline.frame_count,

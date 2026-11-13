@@ -84,3 +84,28 @@ def test_speed_cancel_does_not_start(controller):
     control.start()
     assert control.job is None
     assert calls[-1] == ('busy', False)
+
+
+def test_direct_start_pending_auto_reports_action_and_clears_busy(tmp_path):
+    from datetime import datetime
+    from flir_seq_tool.selection import SourceIdentity
+    from flir_seq_tool.transform import FrameTransform
+    from flir_seq_tool.color_scale_state import ColorScaleState
+    path = tmp_path / 'source.seq'
+    path.write_bytes(b'seq')
+    stat = path.stat()
+    source = SourceIdentity(path.name, stat.st_size, stat.st_mtime_ns, 4, 3, 10,
+                            datetime(2026, 1, 1), datetime(2026, 1, 2))
+    session = SimpleNamespace(reader=SimpleNamespace(path=path), source_identity=lambda: source,
+        measure_source_range=lambda: (2, 5), applied_transform=FrameTransform.identity(4, 3),
+        color_scale=ColorScaleState())
+    calls, jobs = [], []
+    dialogs = SimpleNamespace(choose_video_speed=lambda: 1,
+        choose_video_export=lambda *_: tmp_path / 'out.mp4')
+    control = VideoController(session, dialogs, tmp_path, jobs.append,
+        lambda value: calls.append(value), lambda message: calls.append(message))
+    control.start()
+    assert jobs == [] and control.job is None
+    assert calls[0] is True and calls[-1] is False
+    assert any(isinstance(item, str) and 'Auto' in item and 'manual' in item
+               and 'Per-frame' in item for item in calls)
