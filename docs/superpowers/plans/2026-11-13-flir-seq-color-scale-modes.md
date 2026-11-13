@@ -443,7 +443,7 @@ Process 保存候选范围时则用 `state.settings_for_selection(candidate_scop
 - 修改 `src/flir_seq_tool/video_export.py`、`video_renderer.py`、`video_controller.py`。
 - 修改 `tests/unit/test_video_renderer.py`、`test_video_export.py`、`test_video_controller.py`、`test_video_job.py`。
 
-- [ ] **1. 写渲染与请求 RED。** 复用现有 `video_session/controller/FakeJob`。验证 auto 未 ready 禁止固定导出；manual 不受未匹配自动缓存影响；per_frame 导出冻结 mode 和记忆值，但实际由每个渲染帧决定。重复帧使用相同范围，常值扩展，全无效初帧使用 0～1 并提示，后续全无效沿用最近有效显示范围。
+- [x] **1. 写渲染与请求 RED。** 复用现有 `video_session/controller/FakeJob`。验证 auto 未 ready 禁止固定导出；manual 不受未匹配自动缓存影响；per_frame 导出冻结 mode 和记忆值，但实际由每个渲染帧决定。重复帧使用相同范围，常值扩展，全无效初帧使用 0～1 并提示，后续全无效沿用最近有效显示范围。
 
 ```python
 def test_renderer_adapts_image_and_colorbar_each_frame():
@@ -456,14 +456,14 @@ def test_renderer_adapts_image_and_colorbar_each_frame():
         assert (renderer.colorbar.norm.vmin, renderer.colorbar.norm.vmax) == (23, 50)
 ```
 
-- [ ] **2. 运行失败测试。**
+- [x] **2. 运行失败测试。**
 
 ```powershell
 & .\.packaging\venv\Scripts\python.exe -B -m pytest tests/unit/test_video_renderer.py tests/unit/test_video_export.py tests/unit/test_video_controller.py tests/unit/test_video_job.py -q --tb=short -p no:cacheprovider --basetemp .packaging/tmp/scale-task8-red
 ```
 
-- [ ] **3. build_video_request 冻结完整策略并检查 fixed auto 就绪。** 使用已确认范围和 applied transform；扫描覆盖全部源帧，沿用已完成结果，不根据 timeline 抽帧重算全局极值。保留 source/target snapshots 和发布检查。摘要根据 display mode/source 输出 Fixed automatic / Fixed manual / Per-frame adaptive，逐帧模式不展示记忆值为实际统一温标。
-- [ ] **4. renderer 共用有限范围函数。** fixed 沿用现有冻结值；per_frame 使用 `frame_color_limits(values)`，维护本次视频的 last_valid_limits，初始为空。更新 bounds 时调用 image.set_clim，colorbar 与同一 image norm 绑定。存在状态变化或真正范围改变时才更新对应 artist。适配模式标识和无效提示后保持图像/色条边界分离。
+- [x] **3. build_video_request 冻结完整策略并检查 fixed auto 就绪。** 使用已确认范围和 applied transform；扫描覆盖全部源帧，沿用已完成结果，不根据 timeline 抽帧重算全局极值。保留 source/target snapshots 和发布检查。摘要根据 display mode/source 输出 Fixed automatic / Fixed manual / Per-frame adaptive，逐帧模式不展示记忆值为实际统一温标。
+- [x] **4. renderer 共用有限范围函数。** fixed 沿用现有冻结值；per_frame 使用 `frame_color_limits(values)`，维护本次视频的 last_valid_limits，初始为空。更新 bounds 时调用 image.set_clim，colorbar 与同一 image norm 绑定。存在状态变化或真正范围改变时才更新对应 artist。适配模式标识和无效提示后保持图像/色条边界分离。
 
 ```python
 if self.display.scale_mode == "per_frame":
@@ -477,7 +477,7 @@ if self.display.scale_mode == "per_frame":
 
 `VideoRenderer.__init__` 保存 self.display、初始化 last_valid_limits 和状态文本。render 在 fixed 模式也检测无有效温度提示。现有 worker 对重复源帧复用 RGB 的逻辑保留。
 
-- [ ] **5. 验证保护与提交。** 跑上述全部 MP4 单测及 `test_video_encoder.py/test_video_timeline.py`，确认取消、最终解码、原子替换、目标和源变化保护通过。提交 `feat: export videos with adaptive temperature scales`。
+- [x] **5. 验证保护与提交。** 跑上述全部 MP4 单测及 `test_video_encoder.py/test_video_timeline.py`，确认取消、最终解码、原子替换、目标和源变化保护通过。提交 `feat: export videos with adaptive temperature scales`。
 
 ## Task 9：布局与交互性能回归
 
