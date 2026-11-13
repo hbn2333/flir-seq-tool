@@ -1418,8 +1418,10 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         analysis_state.request, analysis_state.job = request, job
         session.measurement.status = "running"
         measure_panel.set_busy(True)
-        color_controller.set_heavy_busy(True)
+        # Color notifications refresh the page synchronously. Publish the busy
+        # owner first so that refresh cannot redraw the old result as running.
         pages.set_busy("analysis")
+        color_controller.set_heavy_busy(True)
         progress_text.set_visible(True)
         try:
             job.start()

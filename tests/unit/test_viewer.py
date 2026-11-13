@@ -93,7 +93,9 @@ def test_mp4_confirmed_range_busy_cancel_and_close(tmp_path):
     dialogs = FakeSelectionDialogs()
     dialogs.choose_video_speed = lambda: 5
     dialogs.choose_video_export = lambda folder, name: tmp_path / name
-    session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / 's.seq'))
+    # This synthetic source cannot complete an SDK auto scan; exercise the
+    # confirmed-range/video lifecycle with a valid applied manual scale.
+    session = ViewerSession(FileBackedFakeReader(make_frames(5), tmp_path / 's.seq'), vmin=0, vmax=50)
     ui = build_viewer(session, dialogs=dialogs, video_job_factory=FakeJob)
     try:
         ui.range_slider.set_val((1, 3))

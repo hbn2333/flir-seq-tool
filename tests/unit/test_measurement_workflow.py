@@ -193,6 +193,7 @@ def test_cancel_preserves_old_valid_plot_and_result(make_measure_ui, tmp_path):
         ui.poll_analysis()
         old = ui.session.measurement.result_store
         lines = list(ui.measure_panel.result_axes.lines)
+        assert lines, "first calculation must produce a valid plot"
         gate.release.clear()
         gate.entered.clear()
         click(ui, ui.measure_panel.calculate_button)
@@ -205,6 +206,7 @@ def test_cancel_preserves_old_valid_plot_and_result(make_measure_ui, tmp_path):
         assert ui.session.measurement.result_store is old
         assert ui.session.measurement.status == "complete"
         assert old.path.exists()
+        assert list(ui.measure_panel.result_axes.lines) == lines
     finally:
         gate.release.set()
         ui.shutdown_analysis(wait=True)
@@ -271,6 +273,8 @@ def test_analysis_and_native_export_are_mutually_exclusive(make_measure_ui, tmp_
         ui.poll_export()
         assert ui.pages.busy == "analysis"
     finally:
+        # The sentinel only models a queued stale timer, not an owned worker.
+        ui.export_state.job = None
         gate.release.set()
         ui.shutdown_analysis(wait=True)
 
