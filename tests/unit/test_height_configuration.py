@@ -22,13 +22,13 @@ def document():
         measurement=settings)
 
 
-def test_height_settings_and_provenance_roundtrip_v4():
+def test_height_settings_and_provenance_roundtrip_v5():
     original = document()
     parent = replace(original.source, filename='parent.seq', num_frames=20,
                      last_timestamp=original.source.first_timestamp+timedelta(seconds=19))
     original = replace(original, provenance=(SourceLink(parent, 3, 5),))
     payload = original.to_dict()
-    assert payload['schema_version'] == 4
+    assert payload['schema_version'] == 5
     restored = SelectionDocument.from_dict(payload)
     assert restored == original
     assert restored.measurement.height_for('r1').mm_per_pixel == pytest.approx(.2)
@@ -38,16 +38,38 @@ def test_height_settings_and_provenance_roundtrip_v4():
 def test_genuine_v3_preserves_roi_but_defaults_height_and_origin():
     payload = document().to_dict()
     payload['schema_version'] = 3
+    for field in ('scale_mode', 'fixed_source', 'auto_scope'):
+        payload['display'].pop(field, None)
     payload.pop('provenance')
     for field in ('height_settings', 'height_view', 'height_unit'):
         payload['measurement'].pop(field)
     payload['measurement']['result_view'] = 'curves'
     restored = SelectionDocument.from_dict(payload)
-    assert restored.schema_version == 4
+    assert restored.schema_version == 5
     assert restored.measurement.rois == (ROI,)
     assert restored.measurement.result_view == 'curves'
     assert restored.measurement.height_for('r1') == HeightSettings('r1')
     assert restored.provenance == ()
+
+
+def test_genuine_v4_keeps_multiple_provenance_links_and_mm_height():
+    original = document()
+    original = replace(original, measurement=replace(original.measurement, height_unit='mm'))
+    parent = replace(original.source, filename='parent.seq', num_frames=20,
+                     last_timestamp=original.source.first_timestamp+timedelta(seconds=19))
+    ancestor = replace(parent, filename='ancestor.seq', num_frames=40,
+                       last_timestamp=parent.first_timestamp+timedelta(seconds=39))
+    original = replace(original, provenance=(SourceLink(parent, 3, 5), SourceLink(ancestor, 7, 20)))
+    payload = original.to_dict()
+    payload['schema_version'] = 4
+    for field in ('scale_mode', 'fixed_source', 'auto_scope'):
+        payload['display'].pop(field, None)
+    restored = SelectionDocument.from_dict(payload)
+    assert restored == original
+    assert restored.schema_version == 5
+    assert restored.measurement.height_unit == 'mm'
+    assert restored.measurement.height_for('r1').mm_per_pixel == pytest.approx(.2)
+    assert restored.provenance == original.provenance
 
 
 def test_height_settings_references_and_shape_are_strict():

@@ -10,12 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from .transform import CropRect, FrameTransform, RotationSettings
+from .color_scale_models import ColorScaleScope
 from .measurement_models import MeasurementSettings
 from .provenance import SourceLink, validate_provenance
 from .file_safety import DEFAULT_RAW_ROOT, TargetSnapshot, assert_snapshot, validate_write_path
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _TIME_TOLERANCE_S = 1e-6
 
 
@@ -84,7 +85,8 @@ def _validate_root_version_and_keys(
     root_keys = {"schema_version", "source", "selection", "display"}
     expected = {1: root_keys, 2: root_keys | {"transform"},
                 3: root_keys | {"transform", "measurement"},
-                4: root_keys | {"transform", "measurement", "provenance"}}
+                4: root_keys | {"transform", "measurement", "provenance"},
+                5: root_keys | {"transform", "measurement", "provenance"}}
     if schema_version not in expected:
         raise ValueError(f"unsupported schema_version: {schema_version}")
     _require_keys(root, expected[schema_version], "root")
@@ -242,29 +244,51 @@ class DisplaySettings:
     colormap: str
     vmin_c: float
     vmax_c: float
+    scale_mode: str = "fixed"
+    fixed_source: str = "manual"
+    auto_scope: ColorScaleScope | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.colormap, str) or not self.colormap:
             raise ValueError("colormap must be a non-empty string")
-        if not math.isfinite(self.vmin_c) or not math.isfinite(self.vmax_c):
-            raise ValueError("display limits must be finite")
+        _require_float(self.vmin_c, "vmin_c")
+        _require_float(self.vmax_c, "vmax_c")
         if self.vmin_c >= self.vmax_c:
             raise ValueError("vmin_c must be less than vmax_c")
+        if self.scale_mode not in ("fixed", "per_frame"):
+            raise ValueError("scale_mode must be fixed or per_frame")
+        if self.fixed_source not in ("auto", "manual"):
+            raise ValueError("fixed_source must be auto or manual")
+        if self.auto_scope is not None and not isinstance(self.auto_scope, ColorScaleScope):
+            raise ValueError("auto_scope must be a ColorScaleScope or None")
+        if self.fixed_source == "manual" and self.auto_scope is not None:
+            raise ValueError("manual fixed_source requires auto_scope to be None")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "colormap": self.colormap,
             "vmin_c": self.vmin_c,
             "vmax_c": self.vmax_c,
+            "scale_mode": self.scale_mode,
+            "fixed_source": self.fixed_source,
+            "auto_scope": None if self.auto_scope is None else self.auto_scope.to_dict(),
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> DisplaySettings:
-        _require_keys(payload, {"colormap", "vmin_c", "vmax_c"}, "display")
+    def from_dict(cls, payload: dict[str, Any], *, legacy: bool = False) -> DisplaySettings:
+        payload = _require_mapping(payload, "display")
+        expected = {"colormap", "vmin_c", "vmax_c"}
+        if not legacy:
+            expected |= {"scale_mode", "fixed_source", "auto_scope"}
+        _require_keys(payload, expected, "display")
         return cls(
             colormap=_require_string(payload["colormap"], "colormap"),
             vmin_c=_require_float(payload["vmin_c"], "vmin_c"),
             vmax_c=_require_float(payload["vmax_c"], "vmax_c"),
+            scale_mode="fixed" if legacy else _require_string(payload["scale_mode"], "scale_mode"),
+            fixed_source="manual" if legacy else _require_string(payload["fixed_source"], "fixed_source"),
+            auto_scope=(None if legacy or payload["auto_scope"] is None
+                        else ColorScaleScope.from_dict(payload["auto_scope"])),
         )
 
 
@@ -382,7 +406,7 @@ class SelectionDocument:
             else transform_from_dict(root["transform"], source)
         )
         provenance = ()
-        if schema_version == 4:
+        if schema_version >= 4:
             if not isinstance(root['provenance'], list):
                 raise ValueError('provenance must be a list')
             provenance = tuple(SourceLink.from_dict(link) for link in root['provenance'])
@@ -393,7 +417,7 @@ class SelectionDocument:
                 _require_mapping(root["selection"], "selection")
             ),
             display=DisplaySettings.from_dict(
-                _require_mapping(root["display"], "display")
+                _require_mapping(root["display"], "display"), legacy=schema_version < 5
             ),
             transform=transform,
             measurement=(MeasurementSettings.from_dict(root["measurement"], legacy=schema_version == 3)
