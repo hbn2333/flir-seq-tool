@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image
 import pytest
 
+from flir_seq_tool.color_scale import ColorLimits
 from flir_seq_tool.file_safety import TargetSnapshot
 from flir_seq_tool.measurement_export import (AnalysisExportSnapshot, COMMON_COLUMNS, HIST_COLUMNS,
                                              PROFILE_COLUMNS, STATS_COLUMNS, export_csv, export_png,
@@ -268,3 +269,53 @@ def test_png_report_previews_for_distribution_profile_and_curves(snapshot, tmp_p
             print(f"REPORT_PREVIEW={path}")
     finally:
         store.cleanup()
+
+
+def test_legacy_snapshot_defaults_to_display_limits(snapshot):
+    assert snapshot.effective_limits == ColorLimits(0., 10.)
+    assert snapshot.scale_status == 'fixed'
+    assert snapshot.no_finite is False
+
+
+@pytest.mark.parametrize('mode,source,status,no_finite,label', [
+    ('per_frame', 'manual', 'per_frame', False, 'Per-frame'),
+    ('fixed', 'auto', 'temporary', False, 'Fixed automatic | Temporary'),
+    ('fixed', 'auto', 'temporary', True, 'Fixed automatic | Temporary | No finite temperatures'),
+    ('fixed', 'manual', 'manual', False, 'Fixed manual'),
+])
+def test_png_freezes_effective_scale_and_embeds_policy(snapshot, tmp_path, mode, source, status, no_finite, label):
+    from flir_seq_tool.measurement_plots import build_report_figure
+    policy = DisplaySettings('inferno', 20., 45., scale_mode=mode, fixed_source=source)
+    frozen = replace(snapshot, display=policy, effective_limits=ColorLimits(22., 50.),
+                     scale_status=status, no_finite=no_finite,
+                     current_values=np.full((2, 3), np.nan) if no_finite else snapshot.current_values)
+    figure = build_report_figure(frozen)
+    try:
+        assert figure.axes[0].images[0].get_clim() == (22., 50.)
+        assert label in figure._suptitle.get_text()
+        figure.canvas.draw()
+        renderer = figure.canvas.get_renderer()
+        title_box = figure._suptitle.get_window_extent(renderer)
+        assert figure.bbox.contains(title_box.x0, title_box.y0)
+        assert figure.bbox.contains(title_box.x1, title_box.y1)
+        for ax in figure.axes:
+            assert not title_box.overlaps(ax.get_tightbbox(renderer))
+    finally:
+        figure.clear()
+    target = tmp_path / f'scale-{mode}-{source}-{no_finite}.png'
+    export_png(target, frozen, expected=TargetSnapshot.capture(target))
+    with Image.open(target) as picture:
+        picture.load()
+        metadata = json.loads(picture.info['TemperatureScale'])
+        assert metadata == dict(policy=policy.to_dict(), effective_limits=dict(vmin=22., vmax=50.),
+                                status=status, no_finite=no_finite)
+    print(f'SCALE_PREVIEW={target}')
+
+
+@pytest.mark.parametrize('changes', [dict(effective_limits=(1, 2)),
+    dict(effective_limits=ColorLimits(3, 2)),
+    dict(effective_limits=ColorLimits(float('nan'), 2)),
+    dict(scale_status='unknown'), dict(no_finite='yes')])
+def test_snapshot_rejects_invalid_effective_scale(snapshot, changes):
+    with pytest.raises(ValueError):
+        replace(snapshot, **changes)

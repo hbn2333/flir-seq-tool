@@ -1,7 +1,7 @@
 """Paired native SEQ/view configuration helpers (no extraction dependency)."""
 
 from pathlib import Path
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import json
 import os
 import tempfile
@@ -54,7 +54,7 @@ def build_clip_document(
     return build_selection_document(
         source=source, source_start_frame=0, source_end_frame=source.num_frames - 1,
         start_timestamp=first, end_timestamp=last,
-        display=view_document.display, transform=view_document.transform,
+        display=replace(view_document.display, auto_scope=None), transform=view_document.transform,
         measurement=view_document.measurement,
         provenance=(SourceLink(view_document.source, selection.source_start_frame,
                                selection.frame_count), *view_document.provenance),

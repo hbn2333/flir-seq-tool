@@ -71,7 +71,7 @@ def build_report_figure(snapshot):
     grid = figure.add_gridspec(2, 2)
     image_ax = figure.add_subplot(grid[:, 0])
     image = image_ax.imshow(snapshot.current_values, origin="upper", cmap=snapshot.display.colormap,
-                            vmin=snapshot.display.vmin_c, vmax=snapshot.display.vmax_c)
+                            vmin=snapshot.effective_limits.vmin, vmax=snapshot.effective_limits.vmax)
     figure.colorbar(image, ax=image_ax, label="Temperature (°C)")
     image_ax.set(xlabel="x (cropped pixel)", ylabel="y (cropped pixel, downward)")
     image_ax.set_title(f"Local {snapshot.current_local_frame} / source {snapshot.current_source_frame}", fontsize=10)
@@ -101,6 +101,13 @@ def build_report_figure(snapshot):
                 transform=ax.transAxes, fontsize=9, ha="center", parse_math=False)
     title = textwrap.fill(f"{snapshot.source_path.name} | source frames {snapshot.source_range[0]}–{snapshot.source_range[1]}",
                           width=90, break_long_words=True, break_on_hyphens=False)
+    scale_label = ("Per-frame" if snapshot.display.scale_mode == "per_frame" else
+                   "Fixed automatic" if snapshot.display.fixed_source == "auto" else "Fixed manual")
+    if snapshot.scale_status == "temporary":
+        scale_label += " | Temporary"
+    if snapshot.no_finite:
+        scale_label += " | No finite temperatures"
     figure.suptitle(f"{title}\n"
-                    f"{snapshot.timestamp.isoformat()} | {snapshot.algorithm_version}", fontsize=10, parse_math=False)
+                    f"{snapshot.timestamp.isoformat()} | {snapshot.algorithm_version}\n{scale_label}",
+                    fontsize=10, parse_math=False)
     return figure

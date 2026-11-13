@@ -1,3 +1,5 @@
+import pytest
+
 from flir_seq_tool.color_scale import ColorLimits
 from flir_seq_tool.color_scale_job import ColorScaleOutcome
 from flir_seq_tool.measurement_job import AnalysisProgress
@@ -273,3 +275,42 @@ def test_owned_worker_notification_does_not_restart_running_timer(make_measure_u
     ui.poll_color_scale()
     ui.poll_color_scale()
     assert len(starts) == 1
+
+
+@pytest.mark.parametrize('mode,ready,no_finite,status', [
+    ('per_frame', True, False, 'per_frame'),
+    ('fixed', False, False, 'temporary'),
+    ('fixed', False, True, 'temporary'),
+    ('fixed', True, False, 'auto_ready'),
+])
+def test_png_callback_freezes_policy_and_effective_scale_before_dialog(
+        make_measure_ui, tmp_path, monkeypatch, mode, ready, no_finite, status):
+    from flir_seq_tool.measurement_models import MeasurementSettings, Roi
+    from flir_seq_tool.selection import DisplaySettings
+    import flir_seq_tool.viewer as viewer
+    ui = make_measure_ui(color_job_factory=ControlledColorJob)
+    ui.session.measurement.settings = MeasurementSettings((Roi('r1', 'ROI 1', 0, 0, 2, 2, '#123456', True),), 'r1')
+    state = ui.session.color_scale
+    scope = ui.color_controller.context.scope
+    policy = DisplaySettings('inferno', 20., 45., scale_mode=mode, fixed_source='auto',
+                             auto_scope=scope if ready else None)
+    state.load_settings(policy)
+    state.set_scope(scope)
+    state.observe_frame([[float('nan')]] if no_finite else [[22., 50.]])
+    effective = state.render_snapshot().limits
+    ui.pages.switch('measure')
+    captured = []
+    def choose(*args):
+        state.observe_frame([[-100., 200.]])
+        state.restore_auto()
+        assert state.accept_auto(scope, ColorLimits(-10., 100.))
+        state.apply_manual(0., 5.)
+        return tmp_path / 'frozen.png'
+    ui.measure_panel.dialogs.choose_analysis_export = choose
+    monkeypatch.setattr(viewer, 'export_png', lambda target, snapshot, **kwargs: captured.append(snapshot))
+    ui.measure_panel.on_export('png')
+    assert len(captured) == 1
+    snapshot = captured[0]
+    assert snapshot.display == policy
+    assert snapshot.effective_limits == effective
+    assert snapshot.scale_status == status and snapshot.no_finite is no_finite

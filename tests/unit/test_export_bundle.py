@@ -563,3 +563,28 @@ def test_worker_relative_paths_do_not_delete_retained_recovery_materials(tmp_pat
     retained_seq = list(request.clips_root.glob("*.partial.seq"))
     assert len(retained_seq) == 1
     assert retained_seq[0].read_bytes() == b"native child"
+
+
+@pytest.mark.parametrize('mode,source', [('fixed', 'auto'), ('per_frame', 'auto'), ('fixed', 'manual')])
+def test_child_clears_parent_auto_scope_preserving_policy(tmp_path, mode, source):
+    from flir_seq_tool.color_scale_models import ColorScaleScope
+    from flir_seq_tool.color_scale_state import ColorScaleState
+    from flir_seq_tool.export_bundle import build_clip_document
+    path = tmp_path / 'parent.seq'
+    path.write_bytes(b'parent')
+    view = view_document(path)
+    scope = ColorScaleScope.from_inputs(view.source, 3, 7, view.transform)
+    policy = DisplaySettings('magma', 20., 45., scale_mode=mode, fixed_source=source,
+                             auto_scope=scope if source == 'auto' else None)
+    view = replace(view, display=policy)
+    partial = tmp_path / 'partial.seq'
+    partial.write_bytes(b'child')
+    child = build_clip_document(partial, tmp_path / 'child.seq', view,
+                                reader_factory=lambda _: MetadataReader(view))
+    assert child.display == replace(policy, auto_scope=None)
+    assert child.transform == view.transform
+    assert child.measurement == view.measurement
+    assert child.provenance[0].source == view.source
+    state = ColorScaleState(child.display)
+    state.set_scope(ColorScaleScope.from_inputs(child.source, 0, 4, child.transform))
+    assert state.fixed_ready is (source == 'manual')

@@ -1609,13 +1609,15 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
             state = session.measurement
             if state.settings.result_view == "curves" and not state.is_current(session.analysis_key()):
                 raise ValueError("Analysis inputs changed; Calculate again")
-            limits = session.color_limits
+            effective_scale = session.color_scale.render_snapshot()
             snapshot = AnalysisExportSnapshot(
                 identity, Path(session.reader.path), session.measure_source_range(), session.work_timestamps()[0],
                 json.dumps(transform_to_dict(session.applied_transform), allow_nan=False),
-                DisplaySettings(session.colormap, limits.vmin, limits.vmax), state.settings,
+                session.color_scale.settings, state.settings,
                 current_frame.frame_index, session.timeline.current_local_frame, current_frame.timestamp,
-                current_frame.temperature_c, measure_panel.current_analysis, state.result_path)
+                current_frame.temperature_c, measure_panel.current_analysis, state.result_path,
+                effective_limits=effective_scale.limits, scale_status=effective_scale.status,
+                no_finite=effective_scale.no_finite)
             measure_panel.set_busy(True)
             pages.set_busy("analysis_export")
             target = dialogs.choose_analysis_export(kind, WORKSPACE_ROOT / "analysis",

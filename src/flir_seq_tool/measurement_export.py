@@ -13,6 +13,7 @@ import tempfile
 import numpy as np
 from PIL import Image
 
+from .color_scale import ColorLimits
 from .file_safety import DEFAULT_RAW_ROOT, TargetSnapshot, assert_snapshot, validate_write_path
 from .measurement_models import CurrentAnalysis, MeasurementSettings
 from .measurement_state import AnalysisKey
@@ -48,8 +49,24 @@ class AnalysisExportSnapshot:
     result_store_path: Path | None
     algorithm_version: str = "roi-stats-v1"
     format_version: str = "analysis-v1"
+    effective_limits: ColorLimits | None = None
+    scale_status: str = "fixed"
+    no_finite: bool = False
 
     def __post_init__(self):
+        limits = self.effective_limits
+        if limits is None:
+            limits = ColorLimits(self.display.vmin_c, self.display.vmax_c)
+        if (not isinstance(limits, ColorLimits)
+                or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                       or not math.isfinite(value) for value in (limits.vmin, limits.vmax))
+                or limits.vmin >= limits.vmax):
+            raise ValueError("invalid effective color limits")
+        if self.scale_status not in ("fixed", "manual", "auto_ready", "temporary", "per_frame", "preview"):
+            raise ValueError("invalid scale status")
+        if not isinstance(self.no_finite, bool):
+            raise ValueError("no_finite must be boolean")
+        object.__setattr__(self, "effective_limits", limits)
         object.__setattr__(self, "source_path", Path(self.source_path))
         if self.result_store_path is not None:
             object.__setattr__(self, "result_store_path", Path(self.result_store_path))
@@ -231,10 +248,14 @@ def export_png(target, snapshot, *, expected, raw_root=DEFAULT_RAW_ROOT):
         raise ValueError("PNG output requires .png")
     _shape(snapshot)
     from .measurement_plots import build_report_figure
+    scale_metadata = json.dumps(dict(policy=snapshot.display.to_dict(),
+                                    effective_limits=asdict(snapshot.effective_limits),
+                                    status=snapshot.scale_status, no_finite=snapshot.no_finite),
+                               sort_keys=True, separators=(",", ":"), allow_nan=False)
     def writer(path):
         figure = build_report_figure(snapshot)
         try:
-            figure.savefig(path, format="png", dpi=150)
+            figure.savefig(path, format="png", dpi=150, metadata={"TemperatureScale": scale_metadata})
         finally:
             figure.clear()
     def validator(path):
@@ -242,5 +263,7 @@ def export_png(target, snapshot, *, expected, raw_root=DEFAULT_RAW_ROOT):
             if picture.format != "PNG" or min(picture.size) < 1:
                 raise ValueError("PNG verification failed")
             picture.load()
+            if picture.info.get("TemperatureScale") != scale_metadata:
+                raise ValueError("PNG temperature scale verification failed")
     return publish_analysis_file(target, source_path=snapshot.source_path, raw_root=raw_root,
                                   expected=expected, writer=writer, validator=validator)
