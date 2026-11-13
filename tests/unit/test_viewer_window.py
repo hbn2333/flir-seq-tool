@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import pytest
 from matplotlib import colors
 
-from test_viewer import FileBackedFakeReader, FakeSelectionDialogs, make_frames
+from test_viewer import FileBackedFakeReader, FakeTemperatureReader, FakeSelectionDialogs, make_frames
 from flir_seq_tool import viewer
 from flir_seq_tool.selection import SelectionStore
 from flir_seq_tool.viewer import ViewerSession, build_viewer
@@ -40,7 +40,10 @@ def test_native_confirmation_blue_and_reset_on_invalidation(tmp_path):
 class Reader(FileBackedFakeReader):
     def __init__(self, path, *, fail_frame=False):
         # The test owns these newly created, disposable sources.
-        super().__init__(make_frames(5), path)
+        self.path = Path(path)
+        if not self.path.exists():
+            self.path.write_bytes(b'fake-seq-source')
+        FakeTemperatureReader.__init__(self, make_frames(5))
         self.closed = False
         self.fail_frame = fail_frame
 

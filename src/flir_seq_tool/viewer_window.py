@@ -127,8 +127,13 @@ class _OwnedSession:
     stack: ExitStack
     local_frame: int
     notices: tuple[str, ...]
+    closed: bool = False
 
     def close(self):
+        if self.closed:
+            return
+        self.session.close_color_scale(wait=True)
+        self.closed = True
         try:
             self.session.cleanup_measurement_results()
             self.session.source_cache.clear()
@@ -179,7 +184,7 @@ class ViewerWindow:
                 initial_frame=owned.local_frame if local_frame is None else local_frame,
                 figure=self.figure, dialogs=self.dialogs, on_open_seq=self.open_source,
                 can_open_seq=lambda: not self.opening and not self.closed,
-                on_window_close=lambda: self.close(wait=False))
+                on_window_close=lambda: self.close(wait=False), defer_color_scan=True)
             if page != "process":
                 ui.pages.switch(page)
             if owned.notices:
@@ -204,13 +209,21 @@ class ViewerWindow:
             if self.dialogs is None:
                 self.dialogs = SelectionDialogs(getattr(self.figure.canvas.manager, "window", None))
             ui = self._install(self.candidate)
+            self.current, self.candidate, self.ui = self.candidate, None, ui
+            ui.color_controller.activate()
         except BaseException:
-            self.candidate.close()
+            if self.ui is not None:
+                self.ui.dispose(wait=True)
+                self.ui = None
+            if self.current is not None:
+                self.current.close()
+                self.current = None
+            if self.candidate is not None:
+                self.candidate.close()
             self.candidate = None
             if self.figure is not None:
                 plt.close(self.figure)
             raise
-        self.current, self.candidate, self.ui = self.candidate, None, ui
         return ui
 
     def can_open(self):
@@ -227,9 +240,11 @@ class ViewerWindow:
         if not self.can_open():
             return False
         self.opening = True
-        self.ui.pages.refresh()
         old = self.current
+        owner = old.session.color_controller
         try:
+            owner.suspend('open')
+            self.ui.pages.refresh()
             if path is None:
                 path = self.dialogs.choose_seq_open(Path(old.session.reader.path).parent)
             if path is None:
@@ -238,11 +253,27 @@ class ViewerWindow:
             current_path = Path(old.session.reader.path)
             if path.resolve() == current_path.resolve() or (path.exists() and path.samefile(current_path)):
                 return False
+            state = old.session.color_scale
+            if state.draft_pending:
+                action = self.dialogs.choose_color_draft_action(
+                    'Min/Max temperature limits have unapplied edits. Apply them before opening another SEQ?')
+                if action == 'apply':
+                    try:
+                        state.apply_draft()
+                    except ValueError as exc:
+                        self._report(f'Unapplied temperature limits: {str(exc)[:300]}')
+                        return False
+                    owner.reconcile()
+                elif action == 'discard':
+                    state.discard_draft()
+                else:
+                    return False
             if old.session.has_unsaved_changes():
                 action = self.dialogs.choose_unsaved_action(
                     "Current SEQ has unsaved changes. Save and open another file?\n"
                     "Save uses the Process candidate range as the next work range, plus the applied transform, "
-                    "all ROI/height and display settings. The confirmed range is not saved separately. "
+                    "all ROI/height and applied display settings. Unapplied limits are not saved. "
+                    "The confirmed range is not saved separately. "
                     "Calculated results are not saved.")
                 if action == "save":
                     saved = save_window_selection(old.session, self.dialogs)
@@ -258,13 +289,19 @@ class ViewerWindow:
             self.ui.dispose(preserve_session=True)
             try:
                 candidate_ui = self._install(self.candidate)
+                self.current, self.candidate, self.ui = self.candidate, None, candidate_ui
+                candidate_ui.color_controller.activate()
             except Exception as exc:
-                self.candidate.close()
+                if self.current is not old:
+                    self.ui.dispose(wait=True)
+                    self.current.close()
+                    self.current = old
+                elif self.candidate is not None:
+                    self.candidate.close()
                 self.candidate = None
                 self.ui = self._install(old, local_frame=old_frame, page=old_page)
                 self._report(f"Open SEQ failed; restored previous view: {exc}")
                 return False
-            self.current, self.candidate, self.ui = self.candidate, None, candidate_ui
             old.close()
             return True
         except Exception as exc:
@@ -275,6 +312,8 @@ class ViewerWindow:
             return False
         finally:
             self.opening = False
+            if self.current is old and not self.closed:
+                owner.resume('open')
             if self.ui is not None:
                 self.ui.pages.refresh()
 

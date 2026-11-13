@@ -152,6 +152,11 @@ class SelectionDialogs:
                            message=message, detail="Yes: Save and open    No: Discard and open    Cancel: Keep current SEQ")
         return "cancel" if answer is None else "save" if answer else "discard"
 
+    def choose_color_draft_action(self, message: str) -> str:
+        answer = self._run('message', 'askyesnocancel', title='Unapplied temperature limits',
+                           message=message, detail='Yes: Apply limits    No: Discard edits    Cancel: Keep current SEQ')
+        return 'cancel' if answer is None else 'apply' if answer else 'discard'
+
     def choose_analysis_export(self, kind: str, initial_dir: Path, suggested_name: str) -> Path | None:
         if kind not in ("csv", "png"):
             raise ValueError("unknown analysis export kind")

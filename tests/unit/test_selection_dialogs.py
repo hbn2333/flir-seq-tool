@@ -230,6 +230,20 @@ def test_unsaved_open_three_choices(fake_tk, answer, expected):
     assert roots[0].destroyed
 
 
+@pytest.mark.parametrize('answer,expected', [(True, 'apply'), (False, 'discard'), (None, 'cancel')])
+def test_unapplied_temperature_limits_choices(fake_tk, answer, expected):
+    from flir_seq_tool.selection_dialogs import SelectionDialogs
+    roots, calls, behavior, _, _ = fake_tk
+    behavior.value = answer
+    assert SelectionDialogs().choose_color_draft_action('Unapplied Min/Max') == expected
+    assert 'Unapplied temperature limits' in calls[0]['title']
+    assert 'Apply' in calls[0]['detail']
+    assert roots[0].destroyed
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with pytest.raises(RuntimeError, match='main thread'):
+            executor.submit(SelectionDialogs().choose_color_draft_action, 'limits').result()
+
+
 def test_open_seq_uses_native_source_dialog_and_rejects_other_extensions(fake_tk, tmp_path):
     from flir_seq_tool.selection_dialogs import SelectionDialogs
     roots, calls, behavior, _, _ = fake_tk
