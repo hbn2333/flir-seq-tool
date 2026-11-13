@@ -4,6 +4,7 @@ import textwrap
 
 from matplotlib.text import Text
 from matplotlib.widgets import TextBox
+from matplotlib.transforms import Bbox
 
 
 NAV_RECTS = {"process": (0.08, 0.955, 0.13, 0.032), "measure": (0.22, 0.955, 0.13, 0.032),
@@ -14,6 +15,17 @@ MEASURE_CURRENT_RECT = (0.15, 0.535, 0.48, 0.025)
 MEASURE_RESULT_RECT = (0.12, 0.25, 0.76, 0.155)
 MEASURE_CURVE_TEMP_RECT = (0.12, 0.320, 0.76, 0.085)
 MEASURE_CURVE_DELTA_RECT = (0.12, 0.25, 0.76, 0.055)
+PROCESS_IMAGE_RECT = (.075, .22, .585, .58)
+
+
+def process_colorbar_locator(image_axes):
+    """Follow the aspect-fitted image on every draw, including shape changes."""
+    def locate(_axes, _renderer):
+        # Compute the aspect fit even when queried before the image axes draw.
+        image_axes.apply_aspect()
+        box = image_axes.get_position()
+        return Bbox.from_bounds(box.x1 + .012, box.y0, .014, box.height)
+    return locate
 
 # Shared controls; page integration positions the surrounding page regions.
 COLOR_SCALE_RECTS = {
@@ -28,36 +40,41 @@ COLOR_SCALE_RECTS = {
 
 
 NORMAL_RECTS = {
-    "current": (0.15, 0.47, 0.65, 0.025),
-    "range": (0.15, 0.425, 0.65, 0.025),
-    "start": (0.15, 0.36, 0.12, 0.035),
-    "end": (0.37, 0.36, 0.12, 0.035),
-    "confirm": (0.57, 0.36, 0.13, 0.035),
-    "reset": (0.72, 0.36, 0.16, 0.035),
-    "save": (0.47, 0.31, 0.13, 0.035),
-    "load": (0.61, 0.31, 0.13, 0.035),
-    "edit": (0.75, 0.31, 0.13, 0.035),
-    "export": (0.28, 0.255, 0.20, 0.035),
-    "video": (0.50, 0.255, 0.18, 0.035),
-    "cancel": (0.70, 0.255, 0.18, 0.035),
+    "current": (.15, .135, .50, .025),
+    "range": (.15, .095, .50, .025),
+    "start": (.78, .77, .08, .035),
+    "end": (.88, .77, .08, .035),
+    "confirm": (.78, .715, .18, .035),
+    "reset": (.78, .67, .18, .035),
+    "save": (.78, .625, .18, .035),
+    "load": (.78, .58, .18, .035),
+    "edit": (.78, .535, .18, .035),
+    "export": (.78, .48, .18, .035),
+    "video": (.78, .435, .18, .035),
+    "cancel": (.78, .39, .18, .035),
 }
 EDITOR_RECTS = {
-    "angle_slider": (0.15, 0.425, 0.40, 0.025),
-    "angle_box": (0.69, 0.400, 0.13, 0.035),
-    "quick": tuple((x, 0.345, 0.13, 0.040) for x in (0.15, 0.32, 0.49, 0.66)),
-    "crop": tuple((x, 0.270, 0.13, 0.040) for x in (0.15, 0.32, 0.49, 0.66)),
-    "actions": tuple((x, 0.210, 0.15, 0.040) for x in (0.15, 0.33, 0.51, 0.69)),
+    "angle_slider": (.78, .775, .13, .025),
+    "angle_box": (.78, .70, .18, .035),
+    "quick": tuple((x, y, .08, .035) for y in (.645, .60) for x in (.78, .88)),
+    "crop": tuple((x, y, .08, .035) for y in (.525, .455) for x in (.78, .88)),
+    "actions": tuple((.78, y, .18, .035) for y in (.40, .355, .31, .265)),
 }
 # All information is top-aligned: multi-line text grows into its own region.
 TEXT_POSITIONS = {
     "color_scale": (.08, .880),
-    "export": (0.15, 0.235),
-    "progress": (0.15, 0.145),
-    "editor_status": (0.15, 0.190),
-    "editor_error": (0.15, 0.163),
-    "transform": (0.15, 0.125),
-    "timeline": (0.15, 0.102),
-    "message": (0.15, 0.052),
+    "export": (.15, .235),
+    "progress": (.15, .145),
+    "editor_status": (.78, .24),
+    "editor_error": (.78, .20),
+    "transform": (.15, .125),
+    "timeline": (.15, .102),
+    "message": (.15, .052),
+}
+PROCESS_TEXT_POSITIONS = {
+    "transform": (.08, .063), "timeline": (.08, .039),
+    "message": (.78, .15), "progress": (.78, .275),
+    "export": (.78, .37),
 }
 
 
@@ -95,6 +112,7 @@ class BoundedMessage(Text):
         self.key = key
         self.details = details
         self.max_lines = max_lines
+        self.right_edge = .95
         self._drawing = False
         super().__init__(
             *TEXT_POSITIONS[key], text="", fontsize=fontsize, color=color,
@@ -113,7 +131,7 @@ class BoundedMessage(Text):
         if not self.get_visible():
             return
         original = self.details[self.key]
-        available = max(1, (0.95 - self.get_position()[0]) * self.figure.bbox.width)
+        available = max(1, (self.right_edge - self.get_position()[0]) * self.figure.bbox.width)
         # A fixed upper bound also keeps fitting predictable for huge messages.
         max_chars = min(max(24, int(available / 3)), max(24, len(original)))
         while True:

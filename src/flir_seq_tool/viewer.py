@@ -58,7 +58,9 @@ from .transform import FrameTransform
 from .transform_editor import TransformDraft, TransformEditorUI, build_transform_editor
 from .viewer_layout import (BoundedMessage, NORMAL_RECTS, NAV_RECTS, MEASURE_IMAGE_RECT,
                             MEASURE_COLORBAR_RECT, MEASURE_CURRENT_RECT, MEASURE_RESULT_RECT,
-                            MEASURE_CURVE_DELTA_RECT, label_above)
+                            MEASURE_CURVE_DELTA_RECT, label_above,
+                            PROCESS_IMAGE_RECT, process_colorbar_locator,
+                            TEXT_POSITIONS, PROCESS_TEXT_POSITIONS)
 from .viewer_pages import PageCoordinator, PageGroup
 from .video_controller import VideoController
 from .video_export import VideoJob
@@ -696,7 +698,8 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
     figure.canvas.manager.set_window_title(f"FLIR SEQ Tool | {Path(getattr(session.reader, 'path', 'SEQ')).name}")
     if dialogs is None:
         dialogs = SelectionDialogs(getattr(figure.canvas.manager, "window", None))
-    figure.subplots_adjust(bottom=0.56, right=0.87, top=0.81)
+    axes.set_position(PROCESS_IMAGE_RECT)
+    axes.set_anchor("C")
     image = axes.imshow(
         frame.temperature_c,
         cmap=session.colormap,
@@ -704,7 +707,8 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         vmax=limits.vmax,
         origin="upper",
     )
-    colorbar = figure.colorbar(image, ax=axes)
+    colorbar = figure.colorbar(image, cax=figure.add_axes((.672, .20, .014, .60)))
+    colorbar.ax.set_axes_locator(process_colorbar_locator(axes))
     colorbar.set_label("Temperature (°C)")
     process_image_rect = axes.get_position(original=True).frozen()
     process_colorbar_rect = colorbar.ax.get_position(original=True).frozen()
@@ -726,6 +730,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         session.reader.num_frames,
         local_frame=initial_frame,
         local_num_frames=session.timeline.local_num_frames,
+        multiline=True,
     )
 
     current_axes = figure.add_axes(NORMAL_RECTS["current"])
@@ -770,6 +775,8 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         "End frame",
         initial=str(session.timeline.local_num_frames - 1),
     )
+    label_above(start_box)
+    label_above(end_box)
     confirm_button = Button(confirm_axes, "Confirm range", role="primary")
     reset_button = Button(reset_axes, "Reset full")
     save_button = Button(save_axes, "Save selection")
@@ -793,7 +800,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
         0.5, 0.945, "Enlarge window to at least 1000 x 800 logical pixels",
         ha="center", va="top", fontsize=9, color="crimson", visible=False,
     )
-    details_notice = figure.text(0.15, 0.016, "", fontsize=7, va="top")
+    details_notice = figure.text(0.08, 0.016, "", fontsize=7, va="top")
     export_state = ViewerExportState()
     mode_state = ViewerModeState()
     analysis_state = ViewerAnalysisState()
@@ -925,6 +932,7 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
             session.reader.num_frames,
             local_frame=local_frame,
             local_num_frames=session.timeline.local_num_frames,
+            multiline=pages.current == "process",
         )
         refresh_status(next_frame)
         refresh_transform_status()
@@ -1795,6 +1803,16 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
 
     def refresh_page(page: str) -> None:
         measure = page == "measure"
+        for text in (transform_status_text, status_text, error_text, progress_text, export_text):
+            text.set_position((TEXT_POSITIONS if measure else PROCESS_TEXT_POSITIONS)[text.key])
+            text.right_edge = .95 if measure else (.72 if text.key in ("transform", "timeline") else .97)
+        transform_editor.status_text.right_edge = .97
+        transform_editor.error_text.right_edge = .97
+        status_text.max_lines = 2 if measure else 1
+        details_notice.set_x(.15 if measure else .08)
+        _set_frame_title(axes, current_frame, session.reader.num_frames,
+                         session.timeline.current_local_frame, session.timeline.local_num_frames,
+                         multiline=not measure)
         theme.show_page(page, editing=mode_state.editing_transform)
         color_scale_panel.set_busy(pages.busy is not None)
         measure_panel.set_busy(pages.busy is not None)
@@ -1809,6 +1827,8 @@ def _build_viewer(session, initial_frame, clips_root, export_job_factory, dialog
             measure_panel.resampled = session.applied_transform.rotation.angle_deg % 90 != 0
             measure_panel.refresh_frame(current_frame)
         axes.set_position(MEASURE_IMAGE_RECT if measure else process_image_rect)
+        axes.set_anchor((1, .5) if measure else "C")
+        colorbar.ax.set_axes_locator(None if measure else process_colorbar_locator(axes))
         colorbar.ax.set_position(MEASURE_COLORBAR_RECT if measure else process_colorbar_rect)
         slider.ax.set_position(MEASURE_CURRENT_RECT if measure else NORMAL_RECTS["current"])
         slider.valtext.set_visible(not measure)
@@ -1998,9 +2018,11 @@ def _set_frame_title(
     source_num_frames: int,
     local_frame: int,
     local_num_frames: int,
+    *, multiline: bool = False,
 ) -> None:
+    separator = "\n" if multiline else " | "
     axes.set_title(
         f"Local frame {local_frame}/{local_num_frames - 1} | "
-        f"Source frame {frame.frame_index}/{source_num_frames - 1} | "
+        f"Source frame {frame.frame_index}/{source_num_frames - 1}{separator}"
         f"{frame.timestamp.isoformat()}"
     )

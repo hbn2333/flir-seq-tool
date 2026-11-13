@@ -210,11 +210,11 @@ class ViewerTheme:
         self.cards = {}
         rects = {
             "header": (.055, .948, .91, .047),
-            "process_image": (.055, .535, .91, .395),
-            "process_controls": (.055, .245, .91, .275),
-            "process_status": (.055, .025, .91, .215),
-            "editor_controls": (.055, .203, .91, .317),
-            "editor_status": (.055, .025, .91, .17),
+            "process_image": (.025, .18, .72, .66),
+            "process_controls": (.76, .025, .215, .815),
+            "process_status": (.025, .005, .72, .165),
+            "editor_controls": (.76, .255, .215, .585),
+            "editor_status": (.76, .025, .215, .22),
             "measure_image": (.05, .525, .63, .405),
             "measure_roi": (.69, .480, .28, .450),
             "measure_analysis": (.055, .205, .915, .265),

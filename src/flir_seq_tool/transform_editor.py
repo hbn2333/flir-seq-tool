@@ -240,6 +240,9 @@ def build_transform_editor(
         valfmt="%.1f°",
     )
     angle_box = TextBox(angle_box_axes, "Total", initial="0.0")
+    angle_slider.label.set_position((0, 1.5))
+    angle_slider.label.set_horizontalalignment("left")
+    angle_slider.label.set_verticalalignment("bottom")
     label_above(angle_box)
     left_button = Button(quick_axes[0], "+90°")
     right_button = Button(quick_axes[1], "-90°")
