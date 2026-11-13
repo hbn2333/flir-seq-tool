@@ -15,6 +15,17 @@ MEASURE_RESULT_RECT = (0.12, 0.25, 0.76, 0.19)
 MEASURE_CURVE_TEMP_RECT = (0.12, 0.355, 0.76, 0.085)
 MEASURE_CURVE_DELTA_RECT = (0.12, 0.25, 0.76, 0.09)
 
+# Shared controls; page integration positions the surrounding page regions.
+COLOR_SCALE_RECTS = {
+    "fixed": (.08, .465, .12, .035),
+    "per_frame": (.21, .465, .14, .035),
+    "minimum": (.40, .465, .10, .035),
+    "maximum": (.54, .465, .10, .035),
+    "apply": (.66, .465, .09, .035),
+    "auto": (.76, .465, .13, .035),
+    "cancel": (.79, .417, .10, .032),
+}
+
 
 NORMAL_RECTS = {
     "current": (0.15, 0.47, 0.65, 0.025),
@@ -39,6 +50,7 @@ EDITOR_RECTS = {
 }
 # All information is top-aligned: multi-line text grows into its own region.
 TEXT_POSITIONS = {
+    "color_scale": (.08, .448),
     "export": (0.15, 0.235),
     "progress": (0.15, 0.145),
     "editor_status": (0.15, 0.190),
