@@ -98,7 +98,7 @@ $env:PATH = (Join-Path $projectRoot 'dist/portable/slider-performance-20261105/F
 - 修改 `src/flir_seq_tool/color_scale.py`、`tests/unit/test_color_scale.py`。
 - 新建 `src/flir_seq_tool/color_scale_models.py`、`tests/unit/test_color_scale_models.py`。
 
-- [ ] **1. 写失败测试。** 下列用例验证晚帧高温、非有限数和常温帧合并时的真实极值。scope 测试使用 `test_selection.sample_source()` 和 `FrameTransform.identity()`，逐个更改源 mtime、范围、角度和裁剪，要求标识改变；未知字段、bool 帧号、负帧、反向范围和未知算法版本须报错。
+- [x] **1. 写失败测试。** 下列用例验证晚帧高温、非有限数和常温帧合并时的真实极值。scope 测试使用 `test_selection.sample_source()` 和 `FrameTransform.identity()`，逐个更改源 mtime、范围、角度和裁剪，要求标识改变；未知字段、bool 帧号、负帧、反向范围和未知算法版本须报错。
 
 ```python
 def test_raw_extrema_merge_does_not_expand_individual_constant_frames():
@@ -111,13 +111,13 @@ def test_raw_extrema_merge_does_not_expand_individual_constant_frames():
     assert frame_color_limits(np.array([[np.nan, np.inf, -np.inf]])) is None
 ```
 
-- [ ] **2. 执行并确认预期失败。** 完整 imports 写进测试文件，失败必须来自新接口尚未实现。
+- [x] **2. 执行并确认预期失败。** 完整 imports 写进测试文件，失败必须来自新接口尚未实现。
 
 ```powershell
 & .\.packaging\venv\Scripts\python.exe -B -m pytest tests/unit/test_color_scale.py tests/unit/test_color_scale_models.py -q --tb=short -p no:cacheprovider --basetemp .packaging/tmp/scale-task1-red
 ```
 
-- [ ] **3. 实现两个分离阶段和 scope。** 对全局汇总保留原始 extrema，完成后才做常值扩展。旧 `compute_color_limits()` 百分位 API 保留给原有明确调用者。核心计算使用以下实现，并在 `limits_from_extrema()` 校验有限数及顺序。
+- [x] **3. 实现两个分离阶段和 scope。** 对全局汇总保留原始 extrema，完成后才做常值扩展。旧 `compute_color_limits()` 百分位 API 保留给原有明确调用者。核心计算使用以下实现，并在 `limits_from_extrema()` 校验有限数及顺序。
 
 ```python
 def finite_extrema(values):
@@ -144,8 +144,8 @@ def frame_color_limits(values):
 
 scope 使用 canonical JSON + SHA-256 生成源身份摘要，采用现有 `source.to_dict()` 和 `transform.fingerprint`。仅为类型标注使用的 SourceIdentity 放入 TYPE_CHECKING，避免 selection 反向导入时形成循环。
 
-- [ ] **4. 重跑任务 1 测试至通过，并验证所有未修改的百分位用例。** 同命令将 basetemp 改为 `scale-task1-green`，要求退出码 0。
-- [ ] **5. 提交本项四个文件。** `git diff --cached --check` 通过后提交 `feat: add finite temperature range primitives`。
+- [x] **4. 重跑任务 1 测试至通过，并验证所有未修改的百分位用例。** 同命令将 basetemp 改为 `scale-task1-green`，要求退出码 0。
+- [x] **5. 提交本项四个文件。** `git diff --cached --check` 通过后提交 `feat: add finite temperature range primitives`。
 
 ## Task 2：DisplaySettings 与 selection v5
 

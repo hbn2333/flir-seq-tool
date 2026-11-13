@@ -1,0 +1,28 @@
+# FLIR SEQ 温标模式执行记录
+
+日期为 2026-11-13，Asia/Shanghai。依据 [已批准设计](../specs/2026-11-13-flir-seq-color-scale-modes-design.md) 和 [实施计划](2026-11-13-flir-seq-color-scale-modes.md)。用户选择由代理顺序执行，主代理逐项审查。
+
+功能基线为 `c49858b`，设计提交为 `a582375`，计划提交为 `9f50373`。沿用 `codex/color-scale-modes-design` 分支和唯一工作目录 `D:\carbonfoam\infrared`。原始 SEQ 只读，Python 与缓存采用项目内 `.packaging` 环境。
+
+## 基线
+
+- 工作区在开始实施时干净。
+- `test_color_scale.py` 和 `test_selection.py` 基线合计 67 passed，14 条既有依赖弃用警告。
+- 已将全部 raw SEQ 的大小和 UTC mtime 保存至 `.packaging/color-scale-raw-before-20261113.json`，用于真实验证结束后的核对。
+
+## 任务进度
+
+| 任务 | 状态 | 提交及证据 |
+| --- | --- | --- |
+| 1 有限极值与范围标识 | 完成 | `aa19b56`；RED 缺少接口，GREEN 42 passed；独立规格、质量审查均通过，各复测 42 passed |
+| 2 selection v5 | 实施中 | — |
+| 3 独立扫描 worker | 未开始 | — |
+| 4 温标状态与输入草稿 | 未开始 | — |
+| 5 扫描调度控制器 | 未开始 | — |
+| 6 控件、会话与窗口事务 | 未开始 | — |
+| 7 PNG 与子 SEQ 配置 | 未开始 | — |
+| 8 MP4 模式跟随 | 未开始 | — |
+| 9 布局与滑块性能 | 未开始 | — |
+| 10 真实 SEQ、冻结版与交付 | 未开始 | — |
+
+本记录随实际完成情况更新。实施中的任务和未执行的验收不计为通过。
