@@ -6,7 +6,7 @@
 
 1. 完整解压整个文件夹到可写位置，不能只复制 EXE。
 2. 双击 FLIR_SEQ_Tool.exe，选择自己的 .seq；也可将一个 SEQ 文件拖到 EXE 上。
-3. Process 选择帧范围，点击 Confirm range；旋转裁剪后点击变换编辑中的 Apply。
+3. Process 左侧浏览大图，右侧选择帧范围并点击 Confirm range；旋转裁剪时右侧切换为编辑控件，调整后点击 Apply。帧和范围滑块位于图下。
 4. 默认自动扫描已确认范围的全部帧，取得统一温标。扫描完成后可进行 Calculate、MP4 等重任务，期间可以浏览帧。
 5. Measure 添加 ROI，查看当前帧、帧曲线或高度分析，再保存方案、导出数据。顶部 Open SEQ 可在原窗口切换文件。
 6. 默认输出为 output 下的 clips、analysis、selections；另存为可指定其他位置。
