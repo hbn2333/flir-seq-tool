@@ -8,8 +8,8 @@ from matplotlib.widgets import TextBox
 
 NAV_RECTS = {"process": (0.08, 0.955, 0.13, 0.032), "measure": (0.22, 0.955, 0.13, 0.032),
              "open": (0.82, 0.955, 0.13, 0.032)}
-MEASURE_IMAGE_RECT = (0.075, 0.59, 0.46, 0.22)
-MEASURE_COLORBAR_RECT = (0.55, 0.59, 0.018, 0.22)
+MEASURE_IMAGE_RECT = (0.075, 0.62, 0.46, 0.19)
+MEASURE_COLORBAR_RECT = (0.55, 0.62, 0.018, 0.19)
 MEASURE_CURRENT_RECT = (0.15, 0.535, 0.48, 0.025)
 MEASURE_RESULT_RECT = (0.12, 0.25, 0.76, 0.155)
 MEASURE_CURVE_TEMP_RECT = (0.12, 0.320, 0.76, 0.085)

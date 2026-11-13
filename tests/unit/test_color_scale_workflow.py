@@ -475,3 +475,26 @@ def test_scale_layout_real_text_regions_in_all_views(make_measure_ui, tmp_path, 
         assert temp.lines and delta.lines
         assert delta.get_tightbbox(renderer).y1 < temp.bbox.y0
     ui.figure.savefig(tmp_path / f'{view}-{dpi}.png')
+
+@pytest.mark.parametrize('dpi', [100, 150, 200])
+@pytest.mark.parametrize('shape', [(6, 8), (480, 640)])
+@pytest.mark.parametrize('view', ['current', 'curves', 'height'])
+def test_measure_image_xlabel_clears_frame_navigation(make_measure_ui, dpi, shape, view, tmp_path):
+    import numpy as np
+    ui = make_measure_ui(color_job_factory=ControlledColorJob)
+    ui.figure.set_size_inches(10, 8)
+    ui.figure.set_dpi(dpi)
+    ui.pages.switch('measure')
+    ui.measure_panel._set_view('result_view', view)
+    height, width = shape
+    ui.image.set_data(np.zeros(shape))
+    ui.image.set_extent((-.5, width - .5, height - .5, -.5))
+    ui.figure.canvas.draw()
+    renderer = ui.figure.canvas.get_renderer()
+    xlabel = ui.axes.xaxis.label.get_window_extent(renderer)
+    assert ui.axes.xaxis.label.get_visible()
+    assert xlabel.y0 > ui.slider.ax.get_window_extent(renderer).y1
+    assert not xlabel.overlaps(ui.current_frame_box.ax.get_window_extent(renderer))
+    assert not xlabel.overlaps(ui.current_frame_box.label.get_window_extent(renderer))
+    if view == 'current' and dpi == 100:
+        ui.figure.savefig(tmp_path / f'current-xlabel-{width}x{height}-100.png')
