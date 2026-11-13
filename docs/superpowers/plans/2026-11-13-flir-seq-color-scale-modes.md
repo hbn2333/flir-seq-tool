@@ -73,10 +73,11 @@ $env:PATH = (Join-Path $projectRoot 'dist/portable/slider-performance-20261105/F
 | `state.observe_frame(values)` | 计算当前实际上下限并返回 `ColorLimits`，不覆写未应用草稿 |
 | `state.select_mode(mode)` | 只接受 `fixed/per_frame`，保留固定值及草稿记忆 |
 | `state.edit_bounds(min_text, max_text)` | 记录两个原始字符串，设置 `.draft_pending` |
+| `state.discard_draft()` | 只清除未提交文本，保持已生效策略、显示快照和自动缓存 |
 | `state.apply_draft()` / `state.apply_manual(minimum, maximum)` | 校验后一次提交，切 manual，清自动 scope 与输入草稿 |
 | `state.restore_auto()` / `state.accept_auto(scope, limits)` | 恢复 auto 策略、复用匹配缓存；接收匹配的完整自动结果 |
 | `state.settings_for_selection(scope)` | 返回保存用 DisplaySettings，数值为固定记忆，失配或 manual 的 auto_scope 为 null |
-| `state.render_snapshot()` | 不可变 `EffectiveScale(limits, mode, status, no_finite)`，用于实际显示和 PNG |
+| `state.render_snapshot()` | 不可变 `EffectiveScale(limits, mode, status, no_finite)`；status 为 manual/auto_ready/temporary/per_frame/preview |
 | `state.freeze_preview()` / `state.resume_preview()` | 变换草稿期间冻结实际范围，退出后按当前帧和原策略恢复 |
 | `ColorScaleController(state, job_factory=ColorScaleJob)` | 会话持有，无 Matplotlib 对象；接收 context，管理 worker |
 | `controller.set_context(context)` / `activate()` / `reconcile()` | 设置输入、显式激活并按当前策略调度 |
@@ -247,7 +248,7 @@ for completed, source_index in enumerate(range(context.source_start, context.sou
 
 - 新建 `src/flir_seq_tool/color_scale_state.py`、`tests/unit/test_color_scale_state.py`。
 
-- [ ] **1. 写状态转换失败测试。** 构造 `DisplaySettings('inferno', 20, 45, scale_mode='fixed', fixed_source='auto')`；首次帧 20～25 只作临时值，接收匹配完整结果 20～50 后 fixed ready。旧 scope 的结果返回 False。手动 Apply 后 scope 清空，确认范围变化继续使用手动值。
+- [x] **1. 写状态转换失败测试。** 构造 `DisplaySettings('inferno', 20, 45, scale_mode='fixed', fixed_source='auto')`；首次帧 20～25 只作临时值，接收匹配完整结果 20～50 后 fixed ready。旧 scope 的结果返回 False。手动 Apply 后 scope 清空，确认范围变化继续使用手动值。
 
 ```python
 def test_per_frame_browsing_preserves_manual_values_and_draft():
@@ -265,13 +266,13 @@ def test_per_frame_browsing_preserves_manual_values_and_draft():
 
 补充以下参数化用例。扫描完成和切帧不能覆盖任一框的未提交字符串；无效输入不半提交；模式切回恢复来源策略；Auto range 清草稿并复用缓存；全无效首帧 0～1 占位，之后有效帧更新；常值扩展；编辑冻结期间换帧保持原实际范围；固定自动确认范围变化时 scope 失效；selection 快照不取当前自适应值。
 
-- [ ] **2. 运行失败测试。**
+- [x] **2. 运行失败测试。**
 
 ```powershell
 & .\.packaging\venv\Scripts\python.exe -B -m pytest tests/unit/test_color_scale_state.py -q --tb=short -p no:cacheprovider --basetemp .packaging/tmp/scale-task4-red
 ```
 
-- [ ] **3. 按接口表实现 ColorScaleState。** 状态只持有一份已生效 DisplaySettings、一份实际 EffectiveScale、一个最近完成自动缓存和两框草稿。调度进度另由 controller 持有。保存的关键逻辑如下。
+- [x] **3. 按接口表实现 ColorScaleState。** 状态只持有一份已生效 DisplaySettings、一份实际 EffectiveScale、一个最近完成自动缓存和两框草稿。调度进度另由 controller 持有。保存的关键逻辑如下。
 
 ```python
 def settings_for_selection(self, scope):
@@ -289,8 +290,8 @@ def apply_draft(self):
 
 `apply_manual()` 在写 state 前完成全部有限数及递增校验，再一次 replace 配置、清草稿并更新 EffectiveScale。`accept_auto()` 先检查 scope，再同时更新缓存和固定记忆，保留输入草稿。首个有效帧仅在没有固定记忆时初始化记忆，后续临时范围和 per_frame 仅改变 EffectiveScale。
 
-- [ ] **4. 重跑任务 4 与 selection 目标测试。** 比较浏览前后 `settings.to_dict()` 完全相同，结果接收时配置才改变；故意让回调抛错不应留下半提交配置。
-- [ ] **5. 提交状态模块及测试。** 提交信息 `feat: separate color scale settings from live bounds`。
+- [x] **4. 重跑任务 4 与 selection 目标测试。** 比较浏览前后 `settings.to_dict()` 完全相同，结果接收时配置才改变；故意让回调抛错不应留下半提交配置。
+- [x] **5. 提交状态模块及测试。** 提交信息 `feat: separate color scale settings from live bounds`。
 
 ## Task 5：会话持有的扫描调度控制器
 

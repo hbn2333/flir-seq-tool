@@ -17,8 +17,8 @@
 | 1 有限极值与范围标识 | 完成 | `aa19b56`；RED 缺少接口，GREEN 42 passed；独立规格、质量审查均通过，各复测 42 passed |
 | 2 selection v5 | 完成 | `5e72b3f`；RED 33 failed、130 passed；GREEN 160 passed；独立规格复测 160 passed，质量审查通过 |
 | 3 独立扫描 worker | 完成 | `9e9eb2b`；RED 缺少模块；GREEN 187 passed（42 新 worker 测试）；独立规格复测 42 passed，质量审查通过 |
-| 4 温标状态与输入草稿 | 实施中 | — |
-| 5 扫描调度控制器 | 未开始 | — |
+| 4 温标状态与输入草稿 | 完成 | `62e4f7f`、`516b524`；RED 缺少模块及草稿丢弃方法；GREEN 127 passed；规格审查 127 passed，质量审查 146 passed |
+| 5 扫描调度控制器 | 实施中 | — |
 | 6 控件、会话与窗口事务 | 未开始 | — |
 | 7 PNG 与子 SEQ 配置 | 未开始 | — |
 | 8 MP4 模式跟随 | 未开始 | — |
@@ -26,3 +26,7 @@
 | 10 真实 SEQ、冻结版与交付 | 未开始 | — |
 
 本记录随实际完成情况更新。实施中的任务和未执行的验收不计为通过。
+
+## 实施接口补充
+
+任务 4 增加 `discard_draft()`，用于切换文件时明确放弃未提交文本，保持已应用设置、当前快照和自动缓存。EffectiveScale 状态值固定为 manual、auto_ready、temporary、per_frame、preview，no_finite 独立记录。
