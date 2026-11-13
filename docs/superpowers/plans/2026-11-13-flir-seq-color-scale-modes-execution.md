@@ -19,7 +19,7 @@
 | 3 独立扫描 worker | 完成 | `9e9eb2b`；RED 缺少模块；GREEN 187 passed（42 新 worker 测试）；独立规格复测 42 passed，质量审查通过 |
 | 4 温标状态与输入草稿 | 完成 | `62e4f7f`、`516b524`；RED 缺少模块及草稿丢弃方法；GREEN 127 passed；规格审查 127 passed，质量审查 146 passed |
 | 5 扫描调度控制器 | 完成 | `fd776fa`、`1ef47a0`；RED 覆盖缺少模块、启动回收与返回缓存；GREEN 163 passed；规格与质量审查各复测 205 passed |
-| 6 控件、会话与窗口事务 | 6A 面板实施中 | 先面板，后会话及窗口接线，分别审查 |
+| 6 控件、会话与窗口事务 | 6B 接线实施中 | 6A `752a942`、`708cf68`；GREEN 106 passed；规格及质量各复测 21 panel passed |
 | 7 PNG 与子 SEQ 配置 | 未开始 | — |
 | 8 MP4 模式跟随 | 未开始 | — |
 | 9 布局与滑块性能 | 未开始 | — |
@@ -32,3 +32,5 @@
 任务 4 增加 `discard_draft()`，用于切换文件时明确放弃未提交文本，保持已应用设置、当前快照和自动缓存。EffectiveScale 状态值固定为 manual、auto_ready、temporary、per_frame、preview，no_finite 独立记录。
 
 任务 5 增加状态层 invalidate_auto()/reuse_cached_auto() 和 ColorScaleJob.started，用于源变化失效、保留输入草稿的缓存复用及启动后迅速结束的线程回收。审查发现的两处遗漏均已补 RED/GREEN 回归并关闭。
+
+任务 6A 的长错误状态会截掉未提交输入提示，已通过实际绘制 RED 复现，将提示移到状态开头后复审关闭。面板坐标仍为组件阶段的临时位置，6B/9 接线与布局验收负责最终摆放。
