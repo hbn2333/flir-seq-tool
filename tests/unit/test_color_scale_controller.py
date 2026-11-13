@@ -176,6 +176,23 @@ def test_same_scope_cache_does_not_rescan(rig):
     assert state.fixed_ready and len(jobs) == 1
 
 
+def test_return_to_cached_context_reuses_after_retirement_without_losing_draft(rig):
+    controller, state, jobs, context = start(rig)
+    original = controller.context
+    jobs[0].finish()
+    controller.poll()
+    controller.set_context(context('b'))
+    state.edit_bounds('21', '32')
+    controller.set_context(original)
+    assert jobs[1].cancelled and len(jobs) == 2
+    jobs[1].finish()
+    controller.poll()
+    assert len(jobs) == 2 and not controller.blocks_heavy_tasks
+    assert state.fixed_ready and controller.status == 'complete'
+    assert state.draft_bounds == ('21', '32')
+    assert (state.settings.vmin_c, state.settings.vmax_c) == (10, 90)
+
+
 @pytest.mark.parametrize('loaded', [False, True])
 def test_external_source_change_invalidates_cached_auto(rig, loaded):
     controller, state, jobs, context = start(rig)
@@ -314,13 +331,15 @@ def test_close_then_late_success_is_reaped_without_publication(rig):
     assert jobs[0].joins == 1
 
 
-def test_partial_start_failure_keeps_worker_then_reports_failure_after_reap(rig):
+@pytest.mark.parametrize('finished_before_raise', [False, True])
+def test_partial_start_failure_keeps_worker_then_reports_failure_after_reap(rig, finished_before_raise):
     _, state, _, context = rig
     jobs = []
     def factory(request):
         job = ControlledColorJob(request)
         def start_then_fail():
-            job.started = job.alive = True
+            job.started = True
+            job.alive = not finished_before_raise
             raise RuntimeError('start partially succeeded')
         job.start = start_then_fail
         jobs.append(job)

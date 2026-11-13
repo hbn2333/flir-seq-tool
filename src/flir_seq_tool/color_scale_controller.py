@@ -198,7 +198,7 @@ class ColorScaleController:
             self._status = 'cancelled'
         elif not self._auto_policy():
             self._status = 'idle'
-        elif self._state.fixed_ready:
+        elif self._state.fixed_ready or self._state.reuse_cached_auto():
             self._status = 'complete'
         elif not self._attempted:
             self._start()
@@ -220,9 +220,9 @@ class ColorScaleController:
             job.start()
         except Exception as exc:
             self._status, self._error = 'failed', str(exc)
-            # A factory may raise after actually starting a thread. Retain its
-            # ownership if observable; never join a thread that never started.
-            if job is not None and job.is_alive():
+            # start() may raise after the thread has already run to completion.
+            # Start history, rather than liveness, determines join ownership.
+            if job is not None and job.started:
                 self._job = job
                 self._startup_error = str(exc)
                 self._generation += 1

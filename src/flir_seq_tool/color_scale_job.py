@@ -148,6 +148,11 @@ class ColorScaleJob:
     def outcome(self):
         return self._outcome
 
+    @property
+    def started(self):
+        """Whether the thread ran, including a thread that already finished."""
+        return self._thread.ident is not None
+
     def start(self):
         self._thread.start()
 

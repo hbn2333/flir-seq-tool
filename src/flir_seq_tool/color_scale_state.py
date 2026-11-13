@@ -140,6 +140,10 @@ class ColorScaleState:
         self._replace_settings(auto_scope=None)
         self._refresh()
 
+    def reuse_cached_auto(self) -> bool:
+        """Reuse matching automatic limits without changing policy or drafts."""
+        return self._auto_cache is not None and self.accept_auto(*self._auto_cache)
+
     def accept_auto(self, scope: ColorScaleScope, limits: ColorLimits) -> bool:
         if (not isinstance(scope, ColorScaleScope) or scope != self._scope
                 or self.settings.scale_mode != 'fixed'

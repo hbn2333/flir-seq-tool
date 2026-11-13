@@ -38,6 +38,31 @@ def test_invalidate_auto_discards_applied_and_cached_scope_only(loaded):
     assert not state.fixed_ready
 
 
+@pytest.mark.parametrize('policy', ['auto', 'manual', 'per_frame', 'other_scope', 'invalidated'])
+def test_reuse_cached_auto_preserves_draft_and_current_policy(policy):
+    state = auto_state()
+    state.accept_auto(SCOPE, ColorLimits(10, 60))
+    state.set_scope(OTHER)
+    state.set_scope(SCOPE)
+    if policy == 'manual':
+        state.apply_manual(20, 30)
+    elif policy == 'per_frame':
+        state.select_mode('per_frame')
+    elif policy == 'other_scope':
+        state.set_scope(OTHER)
+    elif policy == 'invalidated':
+        state.invalidate_auto()
+    state.edit_bounds('draft', 'retained')
+    before = state.settings
+    assert state.reuse_cached_auto() == (policy == 'auto')
+    assert state.draft_bounds == ('draft', 'retained')
+    if policy == 'auto':
+        assert state.fixed_ready
+        assert (state.settings.vmin_c, state.settings.vmax_c) == (10, 60)
+    else:
+        assert state.settings == before
+
+
 def test_pending_auto_then_complete_and_stale_result():
     state = auto_state()
     original = state.settings

@@ -246,6 +246,25 @@ def test_job_success_and_progress(make_request):
     assert job.progress.snapshot().completed == 2
 
 
+def test_started_records_history_before_during_and_after_thread_exit(make_request):
+    request, factory = make_request([[[20]]])
+    entered, release = threading.Event(), threading.Event()
+    def on_read(index):
+        entered.set()
+        assert release.wait(5)
+    factory.on_read = on_read
+    job = ColorScaleJob(request, reader_factory=factory)
+    assert not job.started
+    job.start()
+    try:
+        assert entered.wait(5)
+        assert job.started and job.is_alive()
+    finally:
+        release.set()
+        job.join(5)
+    assert job.started and not job.is_alive()
+
+
 @pytest.mark.parametrize("changes", [{"source_identity": None}, {"transform": None}, {"source_start": True},
     {"source_end": 2}, {"source_start": -1}, {"source_start": 1, "source_end": 0}, {"source_end": 0.5},
     {"source_path": None}, {"transform": FrameTransform.identity(2, 1)}])
