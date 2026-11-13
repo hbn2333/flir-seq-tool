@@ -152,7 +152,7 @@ class ColorScalePanel:
             elif self.controller.status in ('cancelled', 'paused'):
                 status = f'Auto range {self.controller.status}'
             if fixed and self.state.draft_pending:
-                status += ' — unapplied bounds'
+                status = 'unapplied bounds — ' + status
             if snapshot.no_finite:
                 status += ' — no finite pixels'
             self.status_text.set_text(status)

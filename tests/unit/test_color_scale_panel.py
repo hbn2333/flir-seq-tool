@@ -256,3 +256,18 @@ def test_pending_hint_remains_visible_during_scan(rig):
     panel.sync()
     assert '0/3' in panel.status_text.get_text()
     assert 'unapplied bounds' in panel.status_text.get_text()
+
+
+def test_pending_hint_survives_draw_time_error_truncation(rig):
+    panel, state, *_ = rig
+    invalid = 'invalid' * 300
+    panel.min_box.set_val(invalid)
+    click(panel.apply_button)
+    panel.figure.canvas.draw()
+    displayed = panel.status_text.get_text()
+    details = panel.message_details['color_scale']
+    assert 'unapplied bounds' in displayed
+    assert 'F1' in displayed
+    assert len(displayed.splitlines()) <= 2
+    assert invalid in details
+    assert state.draft_bounds == (invalid, '45.0')
