@@ -410,7 +410,7 @@ old.close()
 - 修改 `src/flir_seq_tool/viewer.py`、`measurement_export.py`、`measurement_plots.py`、`export_bundle.py`。
 - 修改 `tests/unit/test_measurement_export.py`、`test_measurement_plots.py`、`test_export_bundle.py`，扩展 `test_color_scale_workflow.py`。
 
-- [ ] **1. 写 PNG 和 sidecar 失败测试。** 复用 `test_measurement_export.snapshot`。设置记忆固定范围 20～45，但当前 per_frame 为 22～50，要求 PNG 使用 22～50。冻结后切帧、手动修改或扫描完成都不改快照。临时模式、逐帧模式和全无效帧提示入图。复用 export_bundle 的 `view_document/MetadataReader/paired_request`。
+- [x] **1. 写 PNG 和 sidecar 失败测试。** 复用 `test_measurement_export.snapshot`。设置记忆固定范围 20～45，但当前 per_frame 为 22～50，要求 PNG 使用 22～50。冻结后切帧、手动修改或扫描完成都不改快照。临时模式、逐帧模式和全无效帧提示入图。复用 export_bundle 的 `view_document/MetadataReader/paired_request`。
 
 ```python
 snapshot = replace(snapshot, display=replace(snapshot.display, scale_mode="per_frame"),
@@ -419,14 +419,14 @@ figure = build_report_figure(snapshot)
 assert figure.axes[0].images[0].get_clim() == (22.0, 50.0)
 ```
 
-- [ ] **2. 运行 RED。**
+- [x] **2. 运行 RED。**
 
 ```powershell
 & .\.packaging\venv\Scripts\python.exe -B -m pytest tests/unit/test_measurement_export.py tests/unit/test_measurement_plots.py tests/unit/test_export_bundle.py tests/unit/test_color_scale_workflow.py -q --tb=short -p no:cacheprovider --basetemp .packaging/tmp/scale-task7-red
 ```
 
-- [ ] **3. 扩展 AnalysisExportSnapshot 并冻结实际范围。** 在末尾追加 `effective_limits: ColorLimits | None = None`、`scale_status: str = 'fixed'` 和 `no_finite: bool = False`。兼容旧构造，未传 effective 时从 display 固定值取得。实际 UI 传 `render_snapshot()` 的 bounds/status，而 display 仍保存完整策略及固定记忆。PNG renderer 使用 effective_limits，并给出 Per-frame/Temporary/No finite temperatures 状态。配置和 PNG 元数据保留策略与本张实际范围，CSV 的温度统计列保持原数学定义。
-- [ ] **4. 子 SEQ 配套配置清除父 auto_scope。** 完整保留 mode、fixed_source、固定数值、测量和来源链，使用以下变更；子文件重开后在自身范围重新计算。
+- [x] **3. 扩展 AnalysisExportSnapshot 并冻结实际范围。** 在末尾追加 `effective_limits: ColorLimits | None = None`、`scale_status: str = 'fixed'` 和 `no_finite: bool = False`。兼容旧构造，未传 effective 时从 display 固定值取得。实际 UI 传 `render_snapshot()` 的 bounds/status，而 display 仍保存完整策略及固定记忆。PNG renderer 使用 effective_limits，并给出 Per-frame/Temporary/No finite temperatures 状态。配置和 PNG 元数据保留策略与本张实际范围，CSV 的温度统计列保持原数学定义。
+- [x] **4. 子 SEQ 配套配置清除父 auto_scope。** 完整保留 mode、fixed_source、固定数值、测量和来源链，使用以下变更；子文件重开后在自身范围重新计算。
 
 ```python
 child_display = replace(view_document.display, auto_scope=None)
@@ -434,7 +434,7 @@ child_display = replace(view_document.display, auto_scope=None)
 
 Process 保存候选范围时则用 `state.settings_for_selection(candidate_scope)`，只有范围/源/变换完全匹配才保留 auto_scope。覆盖既有确认签名冻结与外部目标变更用例。
 
-- [ ] **5. 回归并提交。** PNG 用 PIL 解码，检查图内温标和标题不遮挡。配套 SEQ+JSON 保留已有原子/失败恢复测试。提交 `feat: preserve effective color scales in image and clip exports`。
+- [x] **5. 回归并提交。** PNG 用 PIL 解码，检查图内温标和标题不遮挡。配套 SEQ+JSON 保留已有原子/失败恢复测试。提交 `feat: preserve effective color scales in image and clip exports`。
 
 ## Task 8：MP4 跟随温标模式
 
