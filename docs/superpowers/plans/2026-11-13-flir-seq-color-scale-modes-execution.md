@@ -19,7 +19,7 @@
 | 3 独立扫描 worker | 完成 | `9e9eb2b`；RED 缺少模块；GREEN 187 passed（42 新 worker 测试）；独立规格复测 42 passed，质量审查通过 |
 | 4 温标状态与输入草稿 | 完成 | `62e4f7f`、`516b524`；RED 缺少模块及草稿丢弃方法；GREEN 127 passed；规格审查 127 passed，质量审查 146 passed |
 | 5 扫描调度控制器 | 完成 | `fd776fa`、`1ef47a0`；RED 覆盖缺少模块、启动回收与返回缓存；GREEN 163 passed；规格与质量审查各复测 205 passed |
-| 6 控件、会话与窗口事务 | 6B2 查看器接线实施中 | 6A `752a942`、`708cf68` 双审查通过；6B1 `225fa99`、`ff6a5d2`，规格 152 passed，质量 110 passed |
+| 6 控件、会话与窗口事务 | 6B3 窗口事务实施中 | 6A、6B1、6B2 均完成双审查；6B2 `074ad1c`，viewer 156 passed，独立 workflow 17 passed |
 | 7 PNG 与子 SEQ 配置 | 未开始 | — |
 | 8 MP4 模式跟随 | 未开始 | — |
 | 9 布局与滑块性能 | 未开始 | — |
@@ -38,3 +38,5 @@
 6B 分为会话接口、查看器接线、窗口事务三段。6B1 使用准备后提交保证源失效时不半更新范围/变换；加载同范围待扫描配置造成的调度停滞已通过 5 个失败回归复现并修复，新增 controller.load_context()。
 
 6B1 暂留两项旧 GUI 温标期望/加载刷新测试，由 6B2 接线解决；此阶段未宣称整套 UI 回归通过。
+
+6B2 完成温标控件、异步 norm 更新、类型化导出可用性和 timer 生命周期。viewer 156 passed、workflow 17 passed、受影响布局/工作流 40 passed、最终 load/dirty/timer 子集 28 passed（覆盖有重叠，不相加）。独立规格复测 workflow 17 passed，质量审查通过。B1 暂留的两项 GUI 用例已修复。
