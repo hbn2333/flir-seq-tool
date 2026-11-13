@@ -85,7 +85,8 @@ $env:PATH = (Join-Path $projectRoot 'dist/portable/slider-performance-20261105/F
 | `controller.suspend(reason)` / `resume(reason)` | 内部暂停原因采用集合，可嵌套；区别于用户取消 |
 | `controller.set_heavy_busy(busy)` / `request_auto()` / `cancel()` | 重任务门控、用户重试/恢复自动、用户明确取消 |
 | `controller.poll()` / `close(wait=False)` | 主线程接收结果，关闭时取消；最终 wait=True 等待退出 |
-| `controller.scanning` / `blocks_heavy_tasks` | 包含退出中的 worker，直到其完全释放独立 reader |
+| `controller.status` / `error` / `progress_snapshot` | 调度状态、错误和 ProgressSnapshot，只读 |
+| `controller.scanning` / `blocks_heavy_tasks` | scanning 表示正在计算；blocks_heavy_tasks 包含取消收尾中的 worker，直到回收所有权 |
 | `ColorScalePanel(figure, state, controller, on_change)` | `.sync()`、`.set_editing(editing)`、`.dispose()`，控件暴露给事件测试 |
 | `build_viewer` 新关键字参数 | `color_job_factory=ColorScaleJob`、`defer_color_scan=False`，保留已有参数 |
 | `ui.color_scale_panel` / `ui.color_controller` / `ui.poll_color_scale()` | ViewerUI 追加温标控件、会话控制器引用和显式轮询入口 |
@@ -299,8 +300,8 @@ def apply_draft(self):
 
 - 新建 `src/flir_seq_tool/color_scale_controller.py`、`tests/unit/test_color_scale_controller.py`。
 
-- [ ] **1. 建立 ControlledColorJob。** 复用 `test_viewer_window.ControlledJob` 的控制方式，明确保存 request、started、cancelled、alive、outcome。该 fake 不自动结束，测试显式设置 outcome/alive。使用实际 `ColorScaleOutcome`，避免以任意 dict 跳过输入校验。
-- [ ] **2. 写 RED 用例。** 连续 context 变化 A→B→C，A 退出前最多一个已启动任务，随后只启动 C；A 的迟到成功不能覆盖 C。用户 Cancel 后页签刷新/reconcile 不重启；Auto range 重试可以启动。内部 suspend 两个原因时，仅两个 resume 都完成后启动。
+- [x] **1. 建立 ControlledColorJob。** 复用 `test_viewer_window.ControlledJob` 的控制方式，明确保存 request、started、cancelled、alive、outcome。该 fake 不自动结束，测试显式设置 outcome/alive。使用实际 `ColorScaleOutcome`，避免以任意 dict 跳过输入校验。
+- [x] **2. 写 RED 用例。** 连续 context 变化 A→B→C，A 退出前最多一个已启动任务，随后只启动 C；A 的迟到成功不能覆盖 C。用户 Cancel 后页签刷新/reconcile 不重启；Auto range 重试可以启动。内部 suspend 两个原因时，仅两个 resume 都完成后启动。
 
 ```python
 controller.set_context(context_a)
@@ -323,7 +324,7 @@ assert jobs[1].request.context == context_c
 & .\.packaging\venv\Scripts\python.exe -B -m pytest tests/unit/test_color_scale_controller.py -q --tb=short -p no:cacheprovider --basetemp .packaging/tmp/scale-task5-red
 ```
 
-- [ ] **3. 实现单 worker reconcile/poll。** `.set_context()` 设置最新目标并调用 `state.set_scope()`，使用户取消标记随真实输入变化失效。输入或模式使活动请求失效时推进 generation。`.suspend(reason)` 设置集合标记并取消当前任务，`.resume(reason)` 移除指定原因后 reconcile。`.cancel()` 单独记录用户取消的 scope。job 仍 alive 时，任何路径只请求 cancel，不新建 worker。
+- [x] **3. 实现单 worker reconcile/poll。** `.set_context()` 设置最新目标并调用 `state.set_scope()`，使用户取消标记随真实输入变化失效。输入或模式使活动请求失效时推进 generation。`.suspend(reason)` 设置集合标记并取消当前任务，`.resume(reason)` 移除指定原因后 reconcile。`.cancel()` 单独记录用户取消的 scope。job 仍 alive 时，任何路径只请求 cancel，不新建 worker。
 
 结果发布顺序固定为以下约束。
 
@@ -341,10 +342,12 @@ if outcome.status == "complete" and matches:
 
 上述发布前还要核验当前文件大小和 mtime，匹配 complete 也必须通过当前策略、内部暂停和用户取消检查。`.poll()` 回收完已退出的 job 后再 reconcile 最新请求。状态通知由当前 attach 回调接收，detach 后不保留旧 UI 闭包。
 
-- [ ] **4. 验证停止与回收。** close(wait=False) 立刻使调度与发布失效并取消 worker；随后 close(wait=True) 仍能 join 同一退休 worker。重复调用安全。测试完全使用可控事件，避免睡眠猜测时序。
-- [ ] **5. 提交控制器与测试。** 提交信息 `feat: coordinate cancellable color scale scans per session`。
+- [x] **4. 验证停止与回收。** close(wait=False) 立刻使调度与发布失效并取消 worker；随后 close(wait=True) 仍能 join 同一退休 worker。重复调用安全。测试完全使用可控事件，避免睡眠猜测时序。
+- [x] **5. 提交控制器与测试。** 提交信息 `feat: coordinate cancellable color scale scans per session`。
 
 ## Task 6：共用控件、会话接线与窗口事务
+
+执行时分为顺序的 6A 共用面板及其事件测试、6B 会话与窗口接线。每段独立实施与双审查，全部完成后标记本项。
 
 **文件**
 
