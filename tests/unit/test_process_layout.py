@@ -111,3 +111,24 @@ def test_process_footer_keeps_time_information_visible(make_measure_ui, monkeypa
     assert box.y0 >= ui.figure.bbox.y0
     assert not box.overlaps(ui.transform_status_text.get_window_extent(renderer))
     assert not box.overlaps(ui.range_slider.ax.bbox)
+
+
+@pytest.mark.parametrize("dpi", [100, 150, 200])
+def test_editor_angle_error_keeps_limit_visible_in_sidebar(make_measure_ui, dpi):
+    ui = make_measure_ui(defer_color_scan=True)
+    ui.figure.set_size_inches(10, 8)
+    ui.figure.set_dpi(dpi)
+    ui.edit_transform_button._observers.process("clicked", None)
+    editor = ui.transform_editor
+    before = editor.draft.build()
+    editor.set_angle(20)
+    ui.figure.canvas.draw()
+    assert editor.draft.build() == before
+    assert "15" in editor.error_text.get_text()
+    assert "within 15 degrees" in ui.message_details["editor_error"]
+    renderer = ui.figure.canvas.get_renderer()
+    bounds = editor.error_text.get_window_extent(renderer)
+    assert .76 * ui.figure.bbox.width <= bounds.x0
+    assert bounds.x1 <= ui.figure.bbox.x1
+    assert bounds.y0 > ui.error_text.get_window_extent(renderer).y1
+    assert not bounds.overlaps(editor.apply_button.ax.bbox)

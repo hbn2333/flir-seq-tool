@@ -144,7 +144,7 @@ def _build_editor(
     applied: list[FrameTransform] | None = None,
     cancelled: list[bool] | None = None,
 ) -> TransformEditorUI:
-    figure, axes = plt.subplots()
+    figure, axes = plt.subplots(figsize=(10, 8))
     axes.set_xlim(-0.5, 7.5)
     axes.set_ylim(5.5, -0.5)
     preview_values = previews if previews is not None else []

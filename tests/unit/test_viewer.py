@@ -1752,7 +1752,7 @@ def test_save_as_export_retains_path_and_reconfirms_external_changes(tmp_path, c
             ui.figure.set_size_inches(10, 8)
             ui.figure.canvas.draw()
             assert "OVERWRITE" in ui.export_text.get_text()
-            assert "Existing selection:" in ui.export_text.get_text()
+            assert "Existing selection:" in " ".join(ui.export_text.get_text().split())
             assert path.read_bytes() == b"external content"
             ui.export_button._observers.process("clicked", None)
         assert len(jobs) == 1 and jobs[0].started

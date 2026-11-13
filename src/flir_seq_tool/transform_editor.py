@@ -265,8 +265,10 @@ def build_transform_editor(
     details = {} if message_details is None else message_details
     status_text = BoundedMessage(figure, "editor_status", details, max_lines=1, fontsize=9)
     error_text = BoundedMessage(
-        figure, "editor_error", details, max_lines=1, fontsize=9, color="crimson",
+        figure, "editor_error", details, max_lines=2, fontsize=9, color="crimson",
     )
+    for message in (status_text, error_text):
+        message.right_edge = .97
 
     editor: TransformEditorUI
 
