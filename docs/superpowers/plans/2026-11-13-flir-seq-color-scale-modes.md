@@ -486,16 +486,16 @@ if self.display.scale_mode == "per_frame":
 - 修改 `tests/unit/test_viewer_layout.py`、`test_viewer.py`、`test_color_scale_panel.py`、`test_color_scale_workflow.py`。
 - 按实际布局检查结果小幅调整 `viewer_layout.py`、`color_scale_panel.py`。
 
-- [ ] **1. 扩展现有最小窗口及 DPI 布局测试。** Process、变换编辑、Measure current/curves/height 均画出新控件，1000×800 及既有较大窗口，DPI 100/150/200，检查文字 bounds 与相邻控件/图像/滑块不重叠。输入值 22.586210250854492、50.18052673339844 和取消/失败长消息纳入，输入可水平定位，显示格式不截断生效精度。
-- [ ] **2. 运行布局 RED。**
+- [x] **1. 扩展现有最小窗口及 DPI 布局测试。** Process、变换编辑、Measure current/curves/height 均画出新控件，1000×800 及既有较大窗口，DPI 100/150/200，检查文字 bounds 与相邻控件/图像/滑块不重叠。输入值 22.586210250854492、50.18052673339844 和取消/失败长消息纳入，输入可水平定位，显示格式不截断生效精度。
+- [x] **2. 运行布局 RED。**
 
 ```powershell
 & .\.packaging\venv\Scripts\python.exe -B -m pytest tests/unit/test_viewer_layout.py tests/unit/test_color_scale_panel.py -q --tb=short -p no:cacheprovider --basetemp .packaging/tmp/scale-task9-red
 ```
 
-- [ ] **3. 完成所需区域调整。** 在 viewer_layout 定义所有温标区域常量，panel 只消费常量。保留现有主题的字体层级和输入保护。移动控件时统一更新图片/滑块区域，隐藏或冻结的控件 active 与可见状态一致。所有 widgets/timer/回调注册到已有 UIResources，避免创建新的资源框架。
-- [ ] **4. 锁定滑块优化和零重复扫描。** 保留 `test_slider_updates_do_not_force_full_canvas_draw` 与 `test_frame_curves_navigation_reuses_plotted_data_and_moves_both_cursors`。新测试将 draw_idle 替换成空函数，真实拖动 Frame/Range 要求无强制 canvas.draw，连续拖动 20 次保持扫描 job 数量不变。模拟慢扫描阻塞 worker 事件时，主线程滑块回调仍能执行并显示最后帧。当前帧数字框及新温标框均不通过 set_val 连续同步整窗绘制。
-- [ ] **5. 回归并提交。** 运行 viewer/measurement/theme/layout/scale UI 定向用例，保留按帧曲线只移动标记线的性能行为，提交 `fix: fit color scale controls without slider redraw regressions`。
+- [x] **3. 完成所需区域调整。** 在 viewer_layout 定义所有温标区域常量，panel 只消费常量。保留现有主题的字体层级和输入保护。移动控件时统一更新图片/滑块区域，隐藏或冻结的控件 active 与可见状态一致。所有 widgets/timer/回调注册到已有 UIResources，避免创建新的资源框架。
+- [x] **4. 锁定滑块优化和零重复扫描。** 保留 `test_slider_updates_do_not_force_full_canvas_draw` 与 `test_frame_curves_navigation_reuses_plotted_data_and_moves_both_cursors`。新测试将 draw_idle 替换成空函数，真实拖动 Frame/Range 要求无强制 canvas.draw，连续拖动 20 次保持扫描 job 数量不变。模拟慢扫描阻塞 worker 事件时，主线程滑块回调仍能执行并显示最后帧。当前帧数字框及新温标框均不通过 set_val 连续同步整窗绘制。
+- [x] **5. 回归并提交。** 运行 viewer/measurement/theme/layout/scale UI 定向用例，保留按帧曲线只移动标记线的性能行为，提交 `fix: fit color scale controls without slider redraw regressions`。
 
 ## Task 10：真实 SEQ、冻结版、文档与交付
 
