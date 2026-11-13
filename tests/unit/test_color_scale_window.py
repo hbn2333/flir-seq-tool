@@ -227,6 +227,30 @@ def test_preserve_session_rebuild_retains_draft_state_controller_and_retiring_jo
     assert len(jobs) == 2
 
 
+def test_failed_candidate_and_failed_restore_do_not_resume_without_live_ui(window_case):
+    window, readers, _, jobs, _ = window_case()
+    old_session, old_ui = window.session, window.ui
+    owner = old_ui.color_controller
+    attempted = []
+    def fail_install(session, **kwargs):
+        attempted.append(session)
+        if session is not old_session:
+            jobs[0].complete(-999, 999)
+            owner.poll()
+            assert not owner.blocks_heavy_tasks
+        raise RuntimeError('both installations fail')
+    window.builder = fail_install
+    assert not window.open_source(readers[0].path.with_name('second.seq'))
+    assert len(attempted) == 2 and attempted[0] is not old_session and attempted[1] is old_session
+    assert window.session is old_session and window.ui is old_ui
+    assert old_ui.pages.disposed and readers[1].closed
+    assert jobs[0].cancelled and not jobs[0].alive
+    assert len(jobs) == 1
+    assert owner.status == 'paused' and not owner.blocks_heavy_tasks
+    window.close(wait=True)
+    assert readers[0].closed and len(jobs) == 1
+
+
 @pytest.mark.parametrize('policy', ['auto', 'manual'])
 def test_discard_draft_then_save_persists_only_applied_settings(window_case, policy):
     window, readers, dialogs, jobs, _ = window_case()

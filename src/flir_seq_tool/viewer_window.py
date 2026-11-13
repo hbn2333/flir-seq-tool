@@ -312,7 +312,8 @@ class ViewerWindow:
             return False
         finally:
             self.opening = False
-            if self.current is old and not self.closed:
+            if (self.current is old and not self.closed and self.ui is not None
+                    and self.ui.session is old.session and not self.ui.pages.disposed):
                 owner.resume('open')
             if self.ui is not None:
                 self.ui.pages.refresh()
