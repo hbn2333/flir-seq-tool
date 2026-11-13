@@ -4,7 +4,16 @@
 
 本工具不将整个 SEQ 载入内存，适合对较长序列选择时间范围、比较区域温度，并导出数据供后续分析。
 
+[下载 Windows 便携版](https://github.com/hbn2333/flir-seq-tool/releases/tag/portable-preview-2026.11.14) · [快速开始](#快速开始) · [源码安装](#从源码安装) · [版本变更](CHANGELOG.md)
+
 ## 效果预览
+
+![Process：左侧大云图、右侧处理控件及图下帧滑块](docs/images/process-overview.png)
+
+*当前 Process 界面。左侧浏览温度场，右侧选择帧范围、编辑旋转裁剪并导出；顶部可切换固定或逐帧温标。本文操作截图由当前程序读取真实 SEQ 后直接导出界面画布，不含操作系统窗口边框。*
+
+<details>
+<summary>查看 MP4 导出示例</summary>
 
 下面是使用本工具导出的三个样品红外展示视频：已应用旋转裁剪，保留固定温标，并显示相对时间和播放倍率。
 
@@ -13,6 +22,8 @@
 [查看或下载完整 MP4](docs/videos/square-0-6287.mp4) · 1920×1080 · 30 fps · 1× · 约 2 分 16 秒 / 22 MB
 
 左上角 `t` 根据 SEQ 源帧时间戳计算，以导出范围首帧为零；右侧色条单位为摄氏度。视频用于展示温度场变化，定量结果请使用 SEQ 和 CSV。
+
+</details>
 
 ## 功能
 
@@ -35,7 +46,12 @@
 
 ### Windows 文件夹便携版（预发布）
 
-正在验证 Windows 10/11 x64 的文件夹版：完整解压后双击 `FLIR_SEQ_Tool.exe` 选择 SEQ，也可将一个 SEQ 拖到 EXE 上。包内收集 Python、Tk、科学计算库、SDK 运行库和 FFmpeg，使用者无需安装 Git、Python 或手动配置环境。
+Windows 10/11 x64 使用者可以直接下载文件夹便携版，包内收集 Python、Tk、科学计算库、SDK 运行库和 FFmpeg，无需安装 Git、Python 或手动配置环境。
+
+1. 在 Release 下载 `FLIR_SEQ_Tool-portable-preview-win64.zip`。
+2. 完整解压到有写权限的位置，保留整个 `FLIR_SEQ_Tool` 文件夹。
+3. 双击 `FLIR_SEQ_Tool.exe` 选择自己的 SEQ，也可将一个 SEQ 拖到 EXE 上。
+4. 进入 Process 预处理，再到 Measure 分析；切换文件使用顶部 `Open SEQ`。
 
 默认结果写入软件目录的 `output/clips`、`output/analysis`、`output/selections`；临时文件和日志位于 `cache`、`logs`。整个文件夹应放在有写权限的位置，不能只移动 EXE。原始数据不随包分发。
 
@@ -47,11 +63,11 @@ FLIR SDK 是专有第三方依赖，仓库公开不代表 SDK 获得开源授权
 
 ### 从源码安装
 
-### 1. 准备官方 SDK
+#### 1. 准备官方 SDK
 
 需要自行取得并安装 FLIR Science File SDK，以及与 Python 版本和架构匹配的官方 Python wheel（已验证为 CPython 3.13 / x64，即 cp313）。SDK、wheel 和实验 SEQ 不包含在仓库中；请按 FLIR 的许可与安装说明获取和使用。
 
-### 2. 克隆项目并创建环境
+#### 2. 克隆项目并创建环境
 
 以下命令在 PowerShell 中执行，仓库可以克隆到自己的目录。
 
@@ -74,7 +90,7 @@ NumPy、SciPy 和 Matplotlib 由项目依赖声明安装；官方 SDK 需单独�
 
 导出 MP4 还需要 PATH 上可用的 FFmpeg，并包含 `libx264` 编码器。可用 `ffmpeg -version` 和 `ffmpeg -encoders` 检查；程序不会自动下载或安装 FFmpeg，也不需要 ffprobe。其余功能无需 FFmpeg。
 
-### 3. 检查环境
+#### 3. 检查环境
 
 ```powershell
 .\.venv\Scripts\python.exe -c "import fnv.file, tkinter, flir_seq_tool; print('Imports OK')"
@@ -87,7 +103,7 @@ NumPy、SciPy 和 Matplotlib 由项目依赖声明安装；官方 SDK 需单独�
 
 ## 快速开始
 
-以下 `C:\data\experiment.seq` 是示例，请替换成自己的文件路径。后续命令均在仓库目录执行，使用同一个已安装 SDK 的 Python 环境。
+便携版使用者直接打开 EXE，按下方流程操作即可。源码使用者也可以从命令行启动；以下路径是示例，请替换成自己的文件，并使用已安装 SDK 的同一个 Python 环境。
 
 ```powershell
 # 快速检查元信息
@@ -105,7 +121,7 @@ NumPy、SciPy 和 Matplotlib 由项目依赖声明安装；官方 SDK 需单独�
 推荐流程：
 
 1. **Process**：选时间范围 → Confirm range → 旋转裁剪 → Apply。
-2. **Measure**：添加 ROI → 检查当前帧 → Calculate 生成帧曲线。
+2. **Measure**：添加 ROI → 检查当前帧 → 切到 Frame curves → Calculate 生成帧曲线；沿高度比较使用 [Height analysis](#高度剖面与分区)。
 3. **保存配置**：Save setup 保存工作范围、变换和 ROI。
 4. **导出结果**：Export CSV / Export PNG；如需另存时间切片，回 Process 使用 Export sub-SEQ。
 
@@ -115,12 +131,12 @@ NumPy、SciPy 和 Matplotlib 由项目依赖声明安装；官方 SDK 需单独�
 
 ## Process：范围与图像修整
 
-Process 采用左侧大云图、右侧操作面板；帧与候选范围滑块位于图下方。旋转裁剪时右侧切换为编辑控件，Measure 保留独立的测量布局。下方示例截图为较早布局，按钮功能与保存语义不变。
+Process 采用左侧大云图、右侧操作面板；帧与候选范围滑块位于图下方。旋转裁剪时右侧切换为编辑控件，Measure 保留独立的测量布局。
 
 ### 时间范围
 
 - `Current frame` 浏览当前工作范围。
-- `Selected range` 选择候选区间；也可在 `Start frame` / `End frame` 输入整数帧号并按 Enter。
+- `Selected range` 选择候选区间；也可在右侧 `Start frame` / `End frame` 输入整数帧号并按 Enter。
 - `Confirm range` 将候选区间设为工作范围，局部帧从 0 重新编号。可重复缩小范围。
 - `Reset full` 恢复完整时间范围，不等于重置旋转裁剪。
 
@@ -157,7 +173,7 @@ Min/Max 输入中的文字是草稿，**Enter 或失焦不会应用，需点击�
 
 ![图 2：调整旋转角度并拖动裁剪框](docs/images/fig2-rotate-crop-editor.png)
 
-*图 2｜旋转裁剪编辑。示例将总角度调整为 −2.1°，并用裁剪框选择保留区域；也可通过 x、y、width、height 输入框精确调整。此时仍是草稿。*
+*图 2｜旋转裁剪编辑。左侧预览旋转结果和裁剪框，右侧调整角度及 x、y、width、height；此时仍是草稿，需 Apply 才生效。*
 
 ![图 3：应用旋转与裁剪后的图像视图](docs/images/fig3-rotate-crop-applied.png)
 
@@ -183,7 +199,7 @@ Measure 使用 **已 Confirm range 的范围**和**已 Apply 的变换**，不�
 
 ![图 4：在 Measure 页面添加矩形 ROI 并查看当前帧温度分布](docs/images/fig4-add-roi.png)
 
-*图 4｜添加矩形 ROI。点击 Add ROI 后在图像中拖框，右侧显示区域参数和当前帧统计，下方 Distribution 显示温度分布。截图底部提示候选时间范围尚未应用；测量仍使用已确认的工作范围。*
+*图 4｜矩形 ROI 与当前帧分析。各框对应样品内部区域，右侧显示当前选中 ROI 的参数和温度统计，下方 Distribution 显示其有效像素温度分布。ROI 极差为区域内 max−min。*
 
 ### 当前帧
 
@@ -203,7 +219,7 @@ Measure 使用 **已 Confirm range 的范围**和**已 Apply 的变换**，不�
 
 ![图 5：三个矩形 ROI 的平均温度与区域内温差曲线](docs/images/fig5-multiple-roi-curves.png)
 
-*图 5｜多个 ROI 与帧曲线。勾选需要比较的区域，在 Frame curves 中点击 Calculate。示例上图显示各 ROI 的平均温度，下图显示各 ROI 内的最大最小温差 ΔT；曲线颜色与区域颜色对应，横轴为已确认范围内的局部帧号。*
+*图 5｜多个 ROI 与帧曲线。勾选需要比较的区域，在 Frame curves 中点击 Calculate。示例上图显示各 ROI 的平均温度，下图显示各 ROI 内的最大最小温差 ΔT；曲线颜色与区域颜色对应，横轴为已确认范围内的局部帧号。图 5～7 使用源帧 6192～7191 作为较短的演示范围。*
 
 ### 高度剖面与分区
 
@@ -216,9 +232,19 @@ Measure 使用 **已 Confirm range 的范围**和**已 Apply 的变换**，不�
 
 每行只对有限温度像素取横向平均，不做温度阈值过滤或平滑。零点在 ROI 的受热端外边界，行中心位置为 0.5、1.5…$H-0.5$ px；输入实际高度 $L$ 后，毫米比例为 $L/H$。移动或调整 ROI 宽度保留比例；改变高度也保留比例并更新所覆盖长度，但几何改变后需重算。
 
+![图 6：Height analysis 中的当前帧温度–高度曲线](docs/images/fig6-height-profile.png)
+
+*图 6｜沿 ROI 高度的当前帧温度剖面。高度从所选受热端指向另一端，每个点为对应像素行内有效温度的横向平均。示例使用像素单位，没有假设样品的实际毫米尺寸；曲线随当前帧更新。*
+
 每个 ROI 的 `Enable zones` 默认关闭。勾选后可设置低／中／高的名称、两个分界位置和温差区间 A/B；低区始终靠近热端。分界跟随 px/mm 单位显示，内部保存为高度比例。每区至少要有一行，非法输入不会替换最后有效设置；ROI 变短导致空区时会关闭分区并提示。
 
 `Zones` 上图比较各 ROI 的三段均温，下图显示有符号的 **区间均温差 A−B**。区间均温对全部有效像素加权，不对各行均温等权平均。**ROI 极差（max−min）**仍保留原含义，两者不能混用。
+
+A/B 用于选择做差的两个高度区间。例如 A 选 Low、B 选 High，就是靠近热端区间的均温减去远端区间的均温；交换 A/B 会改变差值符号。
+
+![图 7：高度分区均温与所选区间的平均温差随时间变化](docs/images/fig7-height-zones.png)
+
+*图 7｜高度分区曲线。示例将各 ROI 分为三段，Low 靠近受热端，High 远离受热端。上图比较分区均温，下图显示所选区间的均温差 A−B；横轴为所有 ROI 共用的相对时间，单位为秒。*
 
 高度时间曲线统一使用已确认范围首帧的实际时间戳为零，横轴为秒；各样品不会分别归零。重复或倒退时间保留并标记，图形断开对应连接。图形可以抽稀，CSV 保留全量。高度方向、标定、分区和 A/B 改动可复用已算行数据；范围、ROI 几何或图像变换改变后需重算。
 
